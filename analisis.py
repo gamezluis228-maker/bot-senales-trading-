@@ -270,3 +270,240 @@ def analisis_completo(symbol):
         "data_24h": price_data,
             }
     
+
+
+# ===================== FORMATO SEÑAL (ESTILO DIRECTO) =====================
+
+def formatear_señal(senal, symbol):
+    data = senal["data_24h"]
+    
+    if senal["tipo"] in ["COMPRA", "COMPRA_DEBIL"]:
+        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
+
+💰 Precio: ${data['price']:.2f}
+📊 Cambio 24h: {data['change24h']:+.2f}%
+📈 Máx 24h: ${data['high24h']:.2f}
+📉 Mín 24h: ${data['low24h']:.2f}
+📦 Volumen: {data['vol24h']:,.0f}
+
+📌 {senal['contexto']}
+
+🎯 TP: ${senal['tp']:.2f}
+🛑 SL: ${senal['sl']:.2f}
+
+⏱️ Temporalidad: 15m - 1H
+⚠️ Gestion de riesgo obligatoria
+🚀 Nunca inviertas mas del 2%"""
+        return texto
+    
+    elif senal["tipo"] in ["VENTA", "VENTA_DEBIL"]:
+        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
+
+💰 Precio: ${data['price']:.2f}
+📊 Cambio 24h: {data['change24h']:+.2f}%
+📈 Máx 24h: ${data['high24h']:.2f}
+📉 Mín 24h: ${data['low24h']:.2f}
+📦 Volumen: {data['vol24h']:,.0f}
+
+📌 {senal['contexto']}
+
+🎯 TP: ${senal['tp']:.2f}
+🛑 SL: ${senal['sl']:.2f}
+
+⏱️ Temporalidad: 15m - 1H
+⚠️ Gestion de riesgo obligatoria
+🚀 Nunca inviertas mas del 2%"""
+        return texto
+    
+    else:
+        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
+
+💰 Precio: ${data['price']:.2f}
+📊 Cambio 24h: {data['change24h']:+.2f}%
+📈 Máx 24h: ${data['high24h']:.2f}
+📉 Mín 24h: ${data['low24h']:.2f}
+📦 Volumen: {data['vol24h']:,.0f}
+
+📌 {senal['contexto']}
+
+🛡️ Soporte: ${senal['soporte']:.2f}
+🏔️ Resistencia: ${senal['resistencia']:.2f}
+
+⏱️ Temporalidad: 15m - 1H
+⚠️ Espera un setup claro antes de operar"""
+        return texto
+
+
+# ===================== FORMATO ANALISIS DETALLADO =====================
+
+def formatear_analisis(senal, symbol):
+    data = senal["data_24h"]
+    upper, middle, lower = senal["bollinger"]
+    
+    texto = f"""📊 ANALISIS TECNICO: {symbol}
+
+💰 Precio: ${data['price']:.2f}
+📈 Tendencia: {senal['tendencia']}
+
+*Indicadores:*
+• RSI(14): {senal['rsi']:.1f}
+• SMA 20: ${senal['sma20']:.2f}
+• SMA 50: ${senal['sma50']:.2f}
+• MACD: {senal['macd']:.2f}
+• Señal MACD: {senal['signal_macd']:.2f}
+• VWAP: ${senal['vwap']:.2f}
+• ATR: {senal['atr']:.2f}
+
+*Bollinger Bands:*
+• Superior: ${upper:.2f}
+• Media: ${middle:.2f}
+• Inferior: ${lower:.2f}
+
+🛡️ Soporte: ${senal['soporte']:.2f}
+🏔️ Resistencia: ${senal['resistencia']:.2f}
+
+{senal['emoji']} SEÑAL: {senal['direccion']}
+
+🎯 TP: ${senal['tp']:.2f}
+🛑 SL: ${senal['sl']:.2f}
+📊 Ratio R/B: {senal['rb']:.2f}:1
+
+⏱️ Temporalidad: 1H
+⚠️ Gestion de riesgo obligatoria"""
+    return texto
+
+
+# ===================== FORMATO SOPORTE/RESISTENCIA =====================
+
+def formatear_soporte(senal, symbol):
+    precio = senal["precio"]
+    soporte = senal["soporte"]
+    resistencia = senal["resistencia"]
+    ruptura = senal["ruptura"]
+    
+    texto = f"🛡️ SOPORTE Y RESISTENCIA: {symbol}\n\n"
+    texto += f"💰 Precio: ${precio:.2f}\n"
+    texto += f"🛡️ Soporte: ${soporte:.2f}\n"
+    texto += f"🏔️ Resistencia: ${resistencia:.2f}\n\n"
+    
+    if ruptura == "RUPTURA_ALCISTA":
+        texto += (
+            "🚨 ALERTA: RUPTURA ALCISTA 🚀\n"
+            "El precio HA ROTO la resistencia.\n"
+            "Posible continuacion alcista.\n\n"
+            f"🎯 Proximo objetivo: ${resistencia * 1.02:.2f}"
+        )
+    elif ruptura == "RUPTURA_BAJISTA":
+        texto += (
+            "🚨 ALERTA: RUPTURA BAJISTA 🔻\n"
+            "El precio HA ROTO el soporte.\n"
+            "Posible continuacion bajista.\n\n"
+            f"🎯 Proximo objetivo: ${soporte * 0.98:.2f}"
+        )
+    else:
+        rango = resistencia - soporte
+        posicion = ((precio - soporte) / rango * 100) if rango > 0 else 50
+        texto += (
+            f"✅ Precio DENTRO DEL RANGO\n"
+            f"📊 Amplitud: {rango:.2f} USDT\n"
+            f"📍 Posicion: {posicion:.1f}% del rango\n\n"
+        )
+        if posicion < 30:
+            texto += "💡 Zona de compra (cerca del soporte)"
+        elif posicion > 70:
+            texto += "💡 Zona de venta (cerca de la resistencia)"
+        else:
+            texto += "💡 Zona neutral — esperar ruptura"
+    
+    return texto
+
+
+# ===================== CALCULADORA FUTUROS =====================
+
+def calcular_futuros(precio, monto):
+    if monto <= 0 or precio <= 0:
+        return None
+    
+    if monto < 50:
+        apal_max = 20
+    elif monto < 200:
+        apal_max = 15
+    elif monto < 500:
+        apal_max = 10
+    elif monto < 1000:
+        apal_max = 7
+    elif monto < 5000:
+        apal_max = 5
+    else:
+        apal_max = 3
+    
+    if precio > 50000:
+        factor = 0.7
+    elif precio > 10000:
+        factor = 0.8
+    elif precio > 1000:
+        factor = 0.9
+    else:
+        factor = 1.0
+    
+    apal = max(1, int(apal_max * factor))
+    posicion = monto * apal
+    cantidad = posicion / precio
+    riesgo_usdt = monto * 0.02
+    
+    sl_pct = max(0.5, 2.0 / apal)
+    tp_pct = sl_pct * 2
+    
+    sl_precio = precio * (1 - sl_pct/100)
+    tp_precio = precio * (1 + tp_pct/100)
+    rb = tp_pct / sl_pct
+    
+    if rb < 1.5:
+        recomendacion = "⚠️ Ratio R/B muy bajo. NO opere."
+    else:
+        recomendacion = "✅ Setup valido. Opera con disciplina."
+    
+    return {
+        "precio": precio,
+        "monto": monto,
+        "apalancamiento": apal,
+        "posicion": posicion,
+        "cantidad": cantidad,
+        "riesgo_usdt": riesgo_usdt,
+        "sl_precio": sl_precio,
+        "tp_precio": tp_precio,
+        "sl_pct": sl_pct,
+        "tp_pct": tp_pct,
+        "rb": rb,
+        "recomendacion": recomendacion,
+    }
+
+
+def formatear_futuros(plan):
+    texto = f"""🧮 PLAN DE FUTUROS
+
+💰 Precio entrada: ${plan['precio']:.2f}
+💵 Capital: ${plan['monto']:.2f} USDT
+
+⚡ Apalancamiento recomendado: {plan['apalancamiento']}x
+📊 Posicion total: ${plan['posicion']:.2f}
+🪙 Cantidad: {plan['cantidad']:.6f}
+
+🛡️ Gestion de Riesgo:
+• Perdida max (2%): ${plan['riesgo_usdt']:.2f} USDT
+• SL: ${plan['sl_precio']:.2f} ({plan['sl_pct']:.2f}%)
+• TP: ${plan['tp_precio']:.2f} ({plan['tp_pct']:.2f}%)
+• Ratio R/B: {plan['rb']:.2f}:1
+
+{plan['recomendacion']}
+
+⚠️ REGLAS OBLIGATORIAS:
+1. Nunca uses mas del 2% de tu cuenta
+2. Si el ratio R/B es menor a 1.5:1, NO opere
+3. Usa stop loss SIEMPRE
+4. No sobre-apalancar por FOMO
+5. Divide tu entrada en 2-3 partes (DCA)
+
+🚀 ¡Exito en tu operacion!"""
+    return texto
+        
