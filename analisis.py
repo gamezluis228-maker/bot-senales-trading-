@@ -5,7 +5,7 @@ import numpy as np
 # ===================== KUCOIN API =====================
 
 def get_kucoin_candles(symbol, timeframe="1hour"):
-    url = f"https://api.kucoin.com/api/v1/market/candles"
+    url = "https://api.kucoin.com/api/v1/market/candles"
     params = {"type": timeframe, "symbol": symbol}
     try:
         r = requests.get(url, params=params, timeout=15)
@@ -30,7 +30,7 @@ def get_kucoin_candles(symbol, timeframe="1hour"):
 
 
 def get_kucoin_price(symbol):
-    url = f"https://api.kucoin.com/api/v1/market/stats"
+    url = "https://api.kucoin.com/api/v1/market/stats"
     params = {"symbol": symbol}
     try:
         r = requests.get(url, params=params, timeout=15)
@@ -43,7 +43,6 @@ def get_kucoin_price(symbol):
                 "high24h": float(d.get("high", 0)),
                 "low24h": float(d.get("low", 0)),
                 "vol24h": float(d.get("vol", 0)),
-                "volValue24h": float(d.get("volValue", 0)),
             }
         return None
     except Exception as e:
@@ -121,7 +120,7 @@ def calcular_vwap(candles):
         pv += tp * c["volume"]
         vol += c["volume"]
     return pv / vol if vol > 0 else candles[-1]["close"]
-
+    
 
 # ===================== SOPORTE / RESISTENCIA =====================
 
@@ -191,7 +190,7 @@ def analisis_completo(symbol):
         emoji = "🟢"
     elif puntos >= 1:
         tipo = "COMPRA_DEBIL"
-        direccion = "ENTRA EN LARGO (con precaución)"
+        direccion = "ENTRA EN LARGO (con precaucion)"
         emoji = "🟡"
     elif puntos <= -3:
         tipo = "VENTA"
@@ -199,7 +198,7 @@ def analisis_completo(symbol):
         emoji = "🔴"
     elif puntos <= -1:
         tipo = "VENTA_DEBIL"
-        direccion = "ENTRA EN CORTO (con precaución)"
+        direccion = "ENTRA EN CORTO (con precaucion)"
         emoji = "🟠"
     else:
         rango = resistencia - soporte
@@ -234,7 +233,7 @@ def analisis_completo(symbol):
     if rsi < 30:
         contexto_parts.append("RSI en sobreventa — posible rebote")
     elif rsi > 70:
-        contexto_parts.append("RSI en sobrecompra — posible corrección")
+        contexto_parts.append("RSI en sobrecompra — posible correccion")
     if precio < lower:
         contexto_parts.append("Precio bajo banda inferior — zona de compra")
     elif precio > upper:
@@ -244,7 +243,7 @@ def analisis_completo(symbol):
     elif ruptura == "RUPTURA_BAJISTA":
         contexto_parts.append("RUPTURA BAJISTA detectada")
     
-    contexto = " | ".join(contexto_parts) if contexto_parts else "Sin señales adicionales"
+    contexto = " | ".join(contexto_parts) if contexto_parts else "Sin senales adicionales"
     
     return {
         "tipo": tipo,
@@ -269,242 +268,5 @@ def analisis_completo(symbol):
         "contexto": contexto,
         "puntos": puntos,
         "data_24h": price_data,
-        }
-    
-
-
-# ===================== FORMATO SEÑAL (ESTILO DIRECTO) =====================
-
-def formatear_señal(senal, symbol):
-    data = senal["data_24h"]
-    
-    if senal["tipo"] in ["COMPRA", "COMPRA_DEBIL"]:
-        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📊 Cambio 24h: {data['change24h']:+.2f}%
-📈 Máx 24h: ${data['high24h']:.2f}
-📉 Mín 24h: ${data['low24h']:.2f}
-📦 Volumen: {data['vol24h']:,.0f}
-
-📌 {senal['contexto']}
-
-🎯 TP: ${senal['tp']:.2f}
-🛑 SL: ${senal['sl']:.2f}
-
-⏱️ Temporalidad: 15m - 1H
-⚠️ Gestión de riesgo obligatoria
-🚀 Nunca inviertas más del 2%"""
-        return texto
-    
-    elif senal["tipo"] in ["VENTA", "VENTA_DEBIL"]:
-        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📊 Cambio 24h: {data['change24h']:+.2f}%
-📈 Máx 24h: ${data['high24h']:.2f}
-📉 Mín 24h: ${data['low24h']:.2f}
-📦 Volumen: {data['vol24h']:,.0f}
-
-📌 {senal['contexto']}
-
-🎯 TP: ${senal['tp']:.2f}
-🛑 SL: ${senal['sl']:.2f}
-
-⏱️ Temporalidad: 15m - 1H
-⚠️ Gestión de riesgo obligatoria
-🚀 Nunca inviertas más del 2%"""
-        return texto
-    
-    else:
-        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📊 Cambio 24h: {data['change24h']:+.2f}%
-📈 Máx 24h: ${data['high24h']:.2f}
-📉 Mín 24h: ${data['low24h']:.2f}
-📦 Volumen: {data['vol24h']:,.0f}
-
-📌 {senal['contexto']}
-
-🛡️ Soporte: ${senal['soporte']:.2f}
-🏔️ Resistencia: ${senal['resistencia']:.2f}
-
-⏱️ Temporalidad: 15m - 1H
-⚠️ Espera un setup claro antes de operar"""
-        return texto
-
-
-# ===================== FORMATO ANÁLISIS DETALLADO =====================
-
-def formatear_analisis(senal, symbol):
-    data = senal["data_24h"]
-    upper, middle, lower = senal["bollinger"]
-    
-    texto = f"""📊 ANÁLISIS TÉCNICO: {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📈 Tendencia: {senal['tendencia']}
-
-*Indicadores:*
-• RSI(14): {senal['rsi']:.1f}
-• SMA 20: ${senal['sma20']:.2f}
-• SMA 50: ${senal['sma50']:.2f}
-• MACD: {senal['macd']:.2f}
-• Señal MACD: {senal['signal_macd']:.2f}
-• VWAP: ${senal['vwap']:.2f}
-• ATR: {senal['atr']:.2f}
-
-*Bollinger Bands:*
-• Superior: ${upper:.2f}
-• Media: ${middle:.2f}
-• Inferior: ${lower:.2f}
-
-🛡️ Soporte: ${senal['soporte']:.2f}
-🏔️ Resistencia: ${senal['resistencia']:.2f}
-
-{senal['emoji']} SEÑAL: {senal['direccion']}
-
-🎯 TP: ${senal['tp']:.2f}
-🛑 SL: ${senal['sl']:.2f}
-📊 Ratio R/B: {senal['rb']:.2f}:1
-
-⏱️ Temporalidad: 1H
-⚠️ Gestión de riesgo obligatoria"""
-    return texto
-
-
-# ===================== FORMATO SOPORTE/RESISTENCIA =====================
-
-def formatear_soporte(senal, symbol):
-    precio = senal["precio"]
-    soporte = senal["soporte"]
-    resistencia = senal["resistencia"]
-    ruptura = senal["ruptura"]
-    
-    texto = f"🛡️ SOPORTE Y RESISTENCIA: {symbol}\n\n"
-    texto += f"💰 Precio: ${precio:.2f}\n"
-    texto += f"🛡️ Soporte: ${soporte:.2f}\n"
-    texto += f"🏔️ Resistencia: ${resistencia:.2f}\n\n"
-    
-    if ruptura == "RUPTURA_ALCISTA":
-        texto += (
-            "🚨 ALERTA: RUPTURA ALCISTA 🚀\n"
-            "El precio HA ROTO la resistencia.\n"
-            "Posible continuación alcista.\n\n"
-            f"🎯 Próximo objetivo: ${resistencia * 1.02:.2f}"
-        )
-    elif ruptura == "RUPTURA_BAJISTA":
-        texto += (
-            "🚨 ALERTA: RUPTURA BAJISTA 🔻\n"
-            "El precio HA ROTO el soporte.\n"
-            "Posible continuación bajista.\n\n"
-            f"🎯 Próximo objetivo: ${soporte * 0.98:.2f}"
-        )
-    else:
-        rango = resistencia - soporte
-        posicion = ((precio - soporte) / rango * 100) if rango > 0 else 50
-        texto += (
-            f"✅ Precio DENTRO DEL RANGO\n"
-            f"📊 Amplitud: {rango:.2f} USDT\n"
-            f"📍 Posición: {posicion:.1f}% del rango\n\n"
-        )
-        if posicion < 30:
-            texto += "💡 Zona de compra (cerca del soporte)"
-        elif posicion > 70:
-            texto += "💡 Zona de venta (cerca de la resistencia)"
-        else:
-            texto += "💡 Zona neutral — esperar ruptura"
-    
-    return texto
-
-
-# ===================== CALCULADORA FUTUROS =====================
-
-def calcular_futuros(precio, monto):
-    if monto <= 0 or precio <= 0:
-        return None
-    
-    if monto < 50:
-        apal_max = 20
-    elif monto < 200:
-        apal_max = 15
-    elif monto < 500:
-        apal_max = 10
-    elif monto < 1000:
-        apal_max = 7
-    elif monto < 5000:
-        apal_max = 5
-    else:
-        apal_max = 3
-    
-    if precio > 50000:
-        factor = 0.7
-    elif precio > 10000:
-        factor = 0.8
-    elif precio > 1000:
-        factor = 0.9
-    else:
-        factor = 1.0
-    
-    apal = max(1, int(apal_max * factor))
-    posicion = monto * apal
-    cantidad = posicion / precio
-    riesgo_usdt = monto * 0.02
-    
-    sl_pct = max(0.5, 2.0 / apal)
-    tp_pct = sl_pct * 2
-    
-    sl_precio = precio * (1 - sl_pct/100)
-    tp_precio = precio * (1 + tp_pct/100)
-    rb = tp_pct / sl_pct
-    
-    if rb < 1.5:
-        recomendacion = "⚠️ Ratio R/B muy bajo. NO opere."
-    else:
-        recomendacion = "✅ Setup válido. Opera con disciplina."
-    
-    return {
-        "precio": precio,
-        "monto": monto,
-        "apalancamiento": apal,
-        "posicion": posicion,
-        "cantidad": cantidad,
-        "riesgo_usdt": riesgo_usdt,
-        "sl_precio": sl_precio,
-        "tp_precio": tp_precio,
-        "sl_pct": sl_pct,
-        "tp_pct": tp_pct,
-        "rb": rb,
-        "recomendacion": recomendacion,
-    }
-
-
-def formatear_futuros(plan):
-    texto = f"""🧮 PLAN DE FUTUROS
-
-💰 Precio entrada: ${plan['precio']:.2f}
-💵 Capital: ${plan['monto']:.2f} USDT
-
-⚡ Apalancamiento recomendado: {plan['apalancamiento']}x
-📊 Posición total: ${plan['posicion']:.2f}
-🪙 Cantidad: {plan['cantidad']:.6f}
-
-🛡️ Gestión de Riesgo:
-• Pérdida máx (2%): ${plan['riesgo_usdt']:.2f} USDT
-• SL: ${plan['sl_precio']:.2f} ({plan['sl_pct']:.2f}%)
-• TP: ${plan['tp_precio']:.2f} ({plan['tp_pct']:.2f}%)
-• Ratio R/B: {plan['rb']:.2f}:1
-
-{plan['recomendacion']}
-
-⚠️ REGLAS OBLIGATORIAS:
-1. Nunca uses más del 2% de tu cuenta
-2. Si el ratio R/B es menor a 1.5:1, NO opere
-3. Usa stop loss SIEMPRE
-4. No sobre-apalancar por FOMO
-5. Divide tu entrada en 2-3 partes (DCA)
-
-🚀 ¡Éxito en tu operación!"""
-    return texto
+            }
     
