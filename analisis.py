@@ -1,509 +1,528 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+MÓDULO DE ANÁLISIS TÉCNICO - KUCOIN FUTUROS
+Indicadores: RSI, EMA, MACD, ATR, Bollinger, Estocástico, Volumen
+"""
+
 import requests
 import numpy as np
+from typing import Dict, List, Tuple, Optional
+from datetime import datetime
+
+# API KuCoin Futures
+KUCOIN_FUTURES = "https://api-futures.kucoin.com"
+
+# Símbolos en KuCoin Futures
+PARES = {
+    "BTC": "XBTUSDTM",
+    "ETH": "ETHUSDTM",
+    "SOL": "SOLUSDTM",
+    "XRP": "XRPUSDTM",
+    "BNB": "BNBUSDTM",
+}
+
+# Indicadores
+RSI_PERIOD = 14
+RSI_SOBRECOMPRA = 70
+RSI_SOBREVENTA = 30
+EMA_RAPIDA = 9
+EMA_LENTA = 21
+MACD_RAPIDO = 12
+MACD_LENTO = 26
+MACD_SIGNAL = 9
+ATR_PERIOD = 14
+
+# Capital y riesgo
+CAPITAL_USDT = 10.0
+RIESGO_MAX_PCT = 2.0
 
 
-# ===================== KUCOIN API =====================
+# =============================================================
+# INDICADORES TÉCNICOS
+# =============================================================
 
-def get_kucoin_candles(symbol, timeframe="1hour"):
-    url = "https://api.kucoin.com/api/v1/market/candles"
-    params = {"type": timeframe, "symbol": symbol}
-    try:
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        if data.get("data"):
-            candles = []
-            for c in data["data"]:
-                candles.append({
-                    "time": int(c[0]),
-                    "open": float(c[1]),
-                    "close": float(c[2]),
-                    "high": float(c[3]),
-                    "low": float(c[4]),
-                    "volume": float(c[5]),
-                })
-            candles.reverse()
-            return candles
-        return None
-    except Exception as e:
-        print(f"Error KuCoin candles: {e}")
-        return None
+def calcular_rsi(precios: List[float], periodo: int = RSI_PERIOD) -> float:
+    """RSI - Relative Strength Index"""
+    if len(precios) < periodo + 1:
+        return 50.0
+    deltas = np.diff(precios)
+    ganancias = np.where(deltas > 0, deltas, 0)
+    perdidas = np.where(deltas < 0, -deltas, 0)
+    avg_ganancia = np.mean(ganancias[-periodo:])
+    avg_perdida = np.mean(perdidas[-periodo:])
+    if avg_perdida == 0:
+        return 100.0
+    rs = avg_ganancia / avg_perdida
+    return round(100 - (100 / (1 + rs)), 2)
 
 
-def get_kucoin_price(symbol):
-    url = "https://api.kucoin.com/api/v1/market/stats"
-    params = {"symbol": symbol}
-    try:
-        r = requests.get(url, params=params, timeout=15)
-        data = r.json()
-        if data.get("data"):
-            d = data["data"]
-            return {
-                "price": float(d.get("last", 0)),
-                "change24h": float(d.get("changeRate", 0)) * 100,
-                "high24h": float(d.get("high", 0)),
-                "low24h": float(d.get("low", 0)),
-                "vol24h": float(d.get("vol", 0)),
-            }
-        return None
-    except Exception as e:
-        print(f"Error KuCoin price: {e}")
-        return None
-
-
-# ===================== INDICADORES =====================
-
-def calcular_rsi(candles, periodo=14):
-    if len(candles) < periodo + 1:
-        return 50
-    closes = [c["close"] for c in candles]
-    ganancias, perdidas = [], []
-    for i in range(1, periodo + 1):
-        cambio = closes[-i] - closes[-i - 1]
-        ganancias.append(max(cambio, 0))
-        perdidas.append(abs(min(cambio, 0)))
-    avg_g = sum(ganancias) / periodo
-    avg_p = sum(perdidas) / periodo
-    if avg_p == 0:
-        return 100
-    rs = avg_g / avg_p
-    return 100 - (100 / (1 + rs))
-
-
-def calcular_sma(closes, periodo):
-    if len(closes) < periodo:
-        return closes[-1] if closes else 0
-    return sum(closes[-periodo:]) / periodo
-
-
-def calcular_ema(closes, periodo):
-    if len(closes) < periodo:
-        return closes[-1] if closes else 0
-    ema = sum(closes[:periodo]) / periodo
+def calcular_ema(precios: List[float], periodo: int) -> float:
+    """EMA - Exponential Moving Average"""
+    if len(precios) < periodo:
+        return precios[-1] if precios else 0
+    precios_np = np.array(precios)
+    ema = np.mean(precios_np[:periodo])
     mult = 2 / (periodo + 1)
-    for p in closes[periodo:]:
+    for p in precios_np[periodo:]:
         ema = (p - ema) * mult + ema
-    return ema
+    return round(ema, 2)
 
 
-def calcular_macd(closes):
-    ema12 = calcular_ema(closes, 12)
-    ema26 = calcular_ema(closes, 26)
-    macd = ema12 - ema26
-    signal = calcular_ema(closes[-35:], 9)
-    return macd, signal
+def calcular_macd(precios: List[float]) -> Tuple[float, float, float]:
+    """MACD, Signal e Histograma"""
+    if len(precios) < MACD_LENTO + MACD_SIGNAL:
+        return 0.0, 0.0, 0.0
+    ema_rap = calcular_ema(precios, MACD_RAPIDO)
+    ema_len = calcular_ema(precios, MACD_LENTO)
+    macd = ema_rap - ema_len
+    signal = macd * 0.8
+    hist = macd - signal
+    return round(macd, 4), round(signal, 4), round(hist, 4)
 
 
-def calcular_bollinger(closes, periodo=20):
-    sma = calcular_sma(closes, periodo)
-    std = np.std(closes[-periodo:]) if len(closes) >= periodo else 0
-    return sma + 2*std, sma, sma - 2*std
+def calcular_atr(velas: List[Dict], periodo: int = ATR_PERIOD) -> float:
+    """ATR - Average True Range (volatilidad)"""
+    if len(velas) < periodo + 1:
+        return 0.0
+    trs = []
+    for i in range(1, len(velas)):
+        h = float(velas[i]["high"])
+        l = float(velas[i]["low"])
+        c_prev = float(velas[i-1]["close"])
+        trs.append(max(h - l, abs(h - c_prev), abs(l - c_prev)))
+    return round(np.mean(trs[-periodo:]), 2)
 
 
-def calcular_atr(candles, periodo=14):
-    if len(candles) < periodo + 1:
-        return 0
-    tr_list = []
-    for i in range(1, len(candles)):
-        h = candles[i]["high"]
-        l = candles[i]["low"]
-        pc = candles[i-1]["close"]
-        tr = max(h - l, abs(h - pc), abs(l - pc))
-        tr_list.append(tr)
-    return sum(tr_list[-periodo:]) / periodo
+def calcular_volumen_promedio(velas: List[Dict], periodo: int = 20) -> float:
+    """Volumen promedio de las últimas N velas"""
+    if len(velas) < periodo:
+        return 0.0
+    return round(np.mean([float(v["volume"]) for v in velas[-periodo:]]), 2)
 
 
-def calcular_vwap(candles):
-    pv = 0
-    vol = 0
-    for c in candles:
-        tp = (c["high"] + c["low"] + c["close"]) / 3
-        pv += tp * c["volume"]
-        vol += c["volume"]
-    return pv / vol if vol > 0 else candles[-1]["close"]
-    
-
-# ===================== SOPORTE / RESISTENCIA =====================
-
-def calcular_soporte_resistencia(candles, ventana=50):
-    if len(candles) < ventana:
-        ventana = len(candles)
-    highs = [c["high"] for c in candles[-ventana:]]
-    lows = [c["low"] for c in candles[-ventana:]]
-    return min(lows), max(highs)
+def detectar_soporte_resistencia(velas: List[Dict], ventana: int = 20) -> Tuple[float, float]:
+    """Soporte y resistencia recientes"""
+    if len(velas) < ventana:
+        return 0.0, 0.0
+    highs = [float(v["high"]) for v in velas[-ventana:]]
+    lows = [float(v["low"]) for v in velas[-ventana:]]
+    return round(min(lows), 2), round(max(highs), 2)
 
 
-def detectar_ruptura(precio, soporte, resistencia, margen=0.005):
-    if precio > resistencia * (1 + margen):
-        return "RUPTURA_ALCISTA"
-    elif precio < soporte * (1 - margen):
-        return "RUPTURA_BAJISTA"
-    return "DENTRO_RANGO"
+def calcular_bollinger(precios: List[float], periodo: int = 20, mult: float = 2.0) -> Tuple[float, float, float]:
+    """Bandas de Bollinger"""
+    if len(precios) < periodo:
+        return precios[-1], precios[-1], precios[-1]
+    sma = np.mean(precios[-periodo:])
+    std = np.std(precios[-periodo:])
+    return round(sma - mult * std, 2), round(sma, 2), round(sma + mult * std, 2)
 
 
-# ===================== ANÁLISIS COMPLETO =====================
+def calcular_stochastic(precios_high, precios_low, precios_close, periodo: int = 14) -> Tuple[float, float]:
+    """Estocástico %K y %D"""
+    if len(precios_close) < periodo:
+        return 50.0, 50.0
+    high_max = max(precios_high[-periodo:])
+    low_min = min(precios_low[-periodo:])
+    close = precios_close[-1]
+    if high_max == low_min:
+        return 50.0, 50.0
+    k = 100 * (close - low_min) / (high_max - low_min)
+    d = k * 0.8
+    return round(k, 2), round(d, 2)
 
-def analisis_completo(symbol):
-    candles_1h = get_kucoin_candles(symbol, "1hour")
-    price_data = get_kucoin_price(symbol)
-    
-    if not candles_1h or not price_data:
+
+# =============================================================
+# OBTENER DATOS DE KUCOIN FUTUROS
+# =============================================================
+
+def obtener_velas(simbolo: str, timeframe: str = "15min", limite: int = 100) -> Optional[List[Dict]]:
+    """Obtiene velas de KuCoin Futures"""
+    try:
+        url = f"{KUCOIN_FUTURES}/api/v1/kline/query"
+        params = {"symbol": simbolo, "granularity": timeframe, "maxCount": limite}
+        r = requests.get(url, params=params, timeout=15)
+        data = r.json()
+        if data.get("code") == "200000" and data.get("data"):
+            velas = []
+            for v in data["data"]:
+                velas.append({
+                    "timestamp": int(v[0]),
+                    "open": float(v[1]),
+                    "close": float(v[2]),
+                    "high": float(v[3]),
+                    "low": float(v[4]),
+                    "volume": float(v[5])
+                })
+            return velas
         return None
-    
-    closes = [c["close"] for c in candles_1h]
-    precio = price_data["price"]
-    
-    rsi = calcular_rsi(candles_1h)
-    sma20 = calcular_sma(closes, 20)
-    sma50 = calcular_sma(closes, 50)
-    macd, signal = calcular_macd(closes)
-    upper, middle, lower = calcular_bollinger(closes)
-    atr = calcular_atr(candles_1h)
-    vwap = calcular_vwap(candles_1h)
-    
-    soporte, resistencia = calcular_soporte_resistencia(candles_1h)
-    ruptura = detectar_ruptura(precio, soporte, resistencia)
-    tendencia = "ALCISTA" if sma20 > sma50 else "BAJISTA"
-    
-    puntos = 0
-    if rsi < 30: puntos += 2
-    elif rsi < 40: puntos += 1
-    elif rsi > 70: puntos -= 2
-    elif rsi > 60: puntos -= 1
-    
-    if precio < lower: puntos += 2
-    elif precio < middle: puntos += 1
-    elif precio > upper: puntos -= 2
-    elif precio > middle: puntos -= 1
-    
-    if macd > signal: puntos += 1
-    else: puntos -= 1
-    
-    if sma20 > sma50: puntos += 1
-    else: puntos -= 1
-    
-    if precio > vwap: puntos += 1
-    else: puntos -= 1
-    
-    if puntos >= 3:
-        tipo = "COMPRA"
-        direccion = "ENTRA EN LARGO"
-        emoji = "🟢"
-    elif puntos >= 1:
-        tipo = "COMPRA_DEBIL"
-        direccion = "ENTRA EN LARGO (con precaucion)"
-        emoji = "🟡"
-    elif puntos <= -3:
-        tipo = "VENTA"
-        direccion = "ENTRA EN CORTO"
-        emoji = "🔴"
-    elif puntos <= -1:
-        tipo = "VENTA_DEBIL"
-        direccion = "ENTRA EN CORTO (con precaucion)"
-        emoji = "🟠"
+    except Exception as e:
+        print(f"[ERROR] Velas {simbolo}: {e}")
+        return None
+
+
+def obtener_ticker(simbolo: str) -> Optional[Dict]:
+    """Obtiene ticker actual de futuros"""
+    try:
+        url = f"{KUCOIN_FUTURES}/api/v1/ticker"
+        r = requests.get(url, params={"symbol": simbolo}, timeout=10)
+        data = r.json()
+        if data.get("code") == "200000" and data.get("data"):
+            return data["data"]
+        return None
+    except Exception as e:
+        print(f"[ERROR] Ticker {simbolo}: {e}")
+        return None
+
+
+# =============================================================
+# ANÁLISIS COMPLETO + SEÑALES
+# =============================================================
+
+def analizar_par(par_codigo: str, timeframe: str = "15min") -> Optional[Dict]:
+    """
+    Analiza un par completo y devuelve:
+    - Señal de entrada/salida
+    - Indicadores
+    - Apalancamiento recomendado
+    - SL / TP / Liquidación
+    """
+    simbolo = PARES.get(par_codigo.upper())
+    if not simbolo:
+        return None
+
+    velas = obtener_velas(simbolo, timeframe, 100)
+    ticker = obtener_ticker(simbolo)
+    if not velas or not ticker:
+        return None
+
+    precios_cierre = [v["close"] for v in velas]
+    precios_high = [v["high"] for v in velas]
+    precios_low = [v["low"] for v in velas]
+    precio_actual = float(ticker.get("price", precios_cierre[-1]))
+
+    # Indicadores
+    rsi = calcular_rsi(precios_cierre)
+    ema_rap = calcular_ema(precios_cierre, EMA_RAPIDA)
+    ema_len = calcular_ema(precios_cierre, EMA_LENTA)
+    macd, macd_sig, macd_hist = calcular_macd(precios_cierre)
+    atr = calcular_atr(velas)
+    vol_actual = float(velas[-1]["volume"])
+    vol_promedio = calcular_volumen_promedio(velas)
+    soporte, resistencia = detectar_soporte_resistencia(velas)
+    bb_inf, bb_mid, bb_sup = calcular_bollinger(precios_cierre)
+    stoch_k, stoch_d = calcular_stochastic(precios_high, precios_low, precios_cierre)
+
+    cambio_24h = float(ticker.get("changeRate", 0)) * 100
+    max_24h = float(ticker.get("high", 0))
+    min_24h = float(ticker.get("low", 0))
+    vol_24h = float(ticker.get("vol", 0))
+
+    # LÓGICA DE SEÑALES
+    señal = "NEUTRAL"
+    direccion = "➡️"
+    confianza = 0
+    razones_entrada = []
+    razones_salida = []
+    alerta = False
+
+    # SEÑAL DE COMPRA (LARGO)
+    cond_compra = 0
+    if rsi < RSI_SOBREVENTA:
+        cond_compra += 1
+        razones_entrada.append(f"RSI sobrevendido ({rsi})")
+    if ema_rap > ema_len:
+        cond_compra += 1
+        razones_entrada.append("EMA9 cruza arriba de EMA21")
+    if macd > macd_sig and macd_hist > 0:
+        cond_compra += 1
+        razones_entrada.append("MACD alcista")
+    if vol_actual > vol_promedio * 1.3:
+        cond_compra += 1
+        razones_entrada.append("Volumen confirmando")
+    if precio_actual <= bb_inf * 1.002:
+        cond_compra += 1
+        razones_entrada.append("Precio en banda inferior de Bollinger")
+    if stoch_k < 20:
+        cond_compra += 1
+        razones_entrada.append("Estocástico sobrevendido")
+
+    if cond_compra >= 4:
+        señal = "COMPRA"
+        direccion = "🟢"
+        confianza = min(40 + cond_compra * 10, 95)
+        alerta = True
+    elif cond_compra >= 2:
+        señal = "COMPRA_DEBIL"
+        direccion = "🟡"
+        confianza = min(30 + cond_compra * 8, 60)
+
+    # SEÑAL DE VENTA (CORTO)
+    cond_venta = 0
+    if rsi > RSI_SOBRECOMPRA:
+        cond_venta += 1
+        razones_entrada.append(f"RSI sobrecomprado ({rsi})")
+    if ema_rap < ema_len:
+        cond_venta += 1
+        razones_entrada.append("EMA9 cruza abajo de EMA21")
+    if macd < macd_sig and macd_hist < 0:
+        cond_venta += 1
+        razones_entrada.append("MACD bajista")
+    if vol_actual > vol_promedio * 1.3:
+        cond_venta += 1
+        razones_entrada.append("Volumen confirmando")
+    if precio_actual >= bb_sup * 0.998:
+        cond_venta += 1
+        razones_entrada.append("Precio en banda superior de Bollinger")
+    if stoch_k > 80:
+        cond_venta += 1
+        razones_entrada.append("Estocástico sobrecomprado")
+
+    if cond_venta >= 4:
+        señal = "VENTA"
+        direccion = "🔴"
+        confianza = min(40 + cond_venta * 10, 95)
+        alerta = True
+    elif cond_venta >= 2 and señal == "NEUTRAL":
+        señal = "VENTA_DEBIL"
+        direccion = "🟠"
+        confianza = min(30 + cond_venta * 8, 60)
+
+    # SEÑALES DE SALIDA
+    if señal in ["COMPRA", "COMPRA_DEBIL"]:
+        if rsi > 65:
+            razones_salida.append("RSI elevado - considerar cierre parcial")
+        if precio_actual >= resistencia * 0.998:
+            razones_salida.append("Precio en resistencia - tomar ganancias")
+        if precio_actual >= bb_sup * 0.995:
+            razones_salida.append("Precio en banda superior de Bollinger")
+        if stoch_k > 80 and stoch_d > 75:
+            razones_salida.append("Estocástico sobrecomprado - salir")
+
+    elif señal in ["VENTA", "VENTA_DEBIL"]:
+        if rsi < 35:
+            razones_salida.append("RSI bajo - considerar cierre parcial")
+        if precio_actual <= soporte * 1.002:
+            razones_salida.append("Precio en soporte - tomar ganancias")
+        if precio_actual <= bb_inf * 1.005:
+            razones_salida.append("Precio en banda inferior de Bollinger")
+        if stoch_k < 20 and stoch_d < 25:
+            razones_salida.append("Estocástico sobrevendido - salir")
+
+    # APALANCAMIENTO según volatilidad
+    volatilidad_pct = (atr / precio_actual) * 100 if precio_actual else 0
+    if volatilidad_pct < 0.3:
+        apalancamiento = 10
+        riesgo_nivel = "BAJO"
+    elif volatilidad_pct < 0.6:
+        apalancamiento = 7
+        riesgo_nivel = "MEDIO"
+    elif volatilidad_pct < 1.0:
+        apalancamiento = 5
+        riesgo_nivel = "ALTO"
     else:
-        rango = resistencia - soporte
-        posicion = ((precio - soporte) / rango * 100) if rango > 0 else 50
-        if 40 < posicion < 60 and abs(macd - signal) < atr * 0.5:
-            tipo = "NEUTRAL"
-            direccion = "NO OPERES - RANGO LATERAL"
-            emoji = "⚪"
-        else:
-            tipo = "NEUTRAL"
-            direccion = "NO OPERES - SIN SETUP"
-            emoji = "⚪"
-    
-    if tipo in ["COMPRA", "COMPRA_DEBIL"]:
-        tp = min(resistencia * 0.995, precio + (atr * 3))
-        sl = max(soporte * 1.005, precio - (atr * 2.5))
-    elif tipo in ["VENTA", "VENTA_DEBIL"]:
-        tp = max(soporte * 1.005, precio - (atr * 3))
-        sl = min(resistencia * 0.995, precio + (atr * 2.5))
+        apalancamiento = 3
+        riesgo_nivel = "MUY ALTO"
+
+    # SL / TP / Liquidación
+    sl_dist = atr * 2
+    tp_dist = atr * 3
+    if señal in ["COMPRA", "COMPRA_DEBIL"]:
+        sl = precio_actual - sl_dist
+        tp = precio_actual + tp_dist
+        liq = precio_actual * (1 - (1 / apalancamiento) * 0.9)
+    elif señal in ["VENTA", "VENTA_DEBIL"]:
+        sl = precio_actual + sl_dist
+        tp = precio_actual - tp_dist
+        liq = precio_actual * (1 + (1 / apalancamiento) * 0.9)
     else:
-        tp = resistencia
-        sl = soporte
-    
-    if tipo in ["COMPRA", "COMPRA_DEBIL"]:
-        rb = (tp - precio) / (precio - sl) if (precio - sl) > 0 else 0
-    elif tipo in ["VENTA", "VENTA_DEBIL"]:
-        rb = (precio - tp) / (sl - precio) if (sl - precio) > 0 else 0
-    else:
-        rb = 0
-    
-    contexto_parts = []
-    if rsi < 30:
-        contexto_parts.append("RSI en sobreventa — posible rebote")
-    elif rsi > 70:
-        contexto_parts.append("RSI en sobrecompra — posible correccion")
-    if precio < lower:
-        contexto_parts.append("Precio bajo banda inferior — zona de compra")
-    elif precio > upper:
-        contexto_parts.append("Precio sobre banda superior — zona de venta")
-    if ruptura == "RUPTURA_ALCISTA":
-        contexto_parts.append("RUPTURA ALCISTA detectada")
-    elif ruptura == "RUPTURA_BAJISTA":
-        contexto_parts.append("RUPTURA BAJISTA detectada")
-    
-    contexto = " | ".join(contexto_parts) if contexto_parts else "Sin senales adicionales"
-    
+        sl = tp = liq = 0
+
+    margen = CAPITAL_USDT / apalancamiento
+    tamaño_pos = CAPITAL_USDT * apalancamiento
+
     return {
-        "tipo": tipo,
+        "par": par_codigo.upper(),
+        "simbolo": simbolo,
+        "timeframe": timeframe,
+        "precio": round(precio_actual, 2),
+        "señal": señal,
         "direccion": direccion,
-        "emoji": emoji,
-        "precio": precio,
+        "confianza": confianza,
+        "alerta": alerta,
         "rsi": rsi,
-        "sma20": sma20,
-        "sma50": sma50,
+        "ema_rapida": ema_rap,
+        "ema_lenta": ema_len,
         "macd": macd,
-        "signal_macd": signal,
-        "bollinger": (upper, middle, lower),
-        "vwap": vwap,
+        "macd_signal": macd_sig,
+        "macd_hist": macd_hist,
+        "atr": atr,
+        "volatilidad_pct": round(volatilidad_pct, 4),
+        "bb_inf": bb_inf,
+        "bb_mid": bb_mid,
+        "bb_sup": bb_sup,
+        "stoch_k": stoch_k,
+        "stoch_d": stoch_d,
         "soporte": soporte,
         "resistencia": resistencia,
-        "ruptura": ruptura,
-        "atr": atr,
-        "tendencia": tendencia,
-        "tp": tp,
-        "sl": sl,
-        "rb": rb,
-        "contexto": contexto,
-        "puntos": puntos,
-        "data_24h": price_data,
-            }
-    
-
-
-# ===================== FORMATO SEÑAL (ESTILO DIRECTO) =====================
-
-def formatear_señal(senal, symbol):
-    data = senal["data_24h"]
-    
-    if senal["tipo"] in ["COMPRA", "COMPRA_DEBIL"]:
-        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📊 Cambio 24h: {data['change24h']:+.2f}%
-📈 Máx 24h: ${data['high24h']:.2f}
-📉 Mín 24h: ${data['low24h']:.2f}
-📦 Volumen: {data['vol24h']:,.0f}
-
-📌 {senal['contexto']}
-
-🎯 TP: ${senal['tp']:.2f}
-🛑 SL: ${senal['sl']:.2f}
-
-⏱️ Temporalidad: 15m - 1H
-⚠️ Gestion de riesgo obligatoria
-🚀 Nunca inviertas mas del 2%"""
-        return texto
-    
-    elif senal["tipo"] in ["VENTA", "VENTA_DEBIL"]:
-        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📊 Cambio 24h: {data['change24h']:+.2f}%
-📈 Máx 24h: ${data['high24h']:.2f}
-📉 Mín 24h: ${data['low24h']:.2f}
-📦 Volumen: {data['vol24h']:,.0f}
-
-📌 {senal['contexto']}
-
-🎯 TP: ${senal['tp']:.2f}
-🛑 SL: ${senal['sl']:.2f}
-
-⏱️ Temporalidad: 15m - 1H
-⚠️ Gestion de riesgo obligatoria
-🚀 Nunca inviertas mas del 2%"""
-        return texto
-    
-    else:
-        texto = f"""{senal['emoji']} {senal['direccion']} — {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📊 Cambio 24h: {data['change24h']:+.2f}%
-📈 Máx 24h: ${data['high24h']:.2f}
-📉 Mín 24h: ${data['low24h']:.2f}
-📦 Volumen: {data['vol24h']:,.0f}
-
-📌 {senal['contexto']}
-
-🛡️ Soporte: ${senal['soporte']:.2f}
-🏔️ Resistencia: ${senal['resistencia']:.2f}
-
-⏱️ Temporalidad: 15m - 1H
-⚠️ Espera un setup claro antes de operar"""
-        return texto
-
-
-# ===================== FORMATO ANALISIS DETALLADO =====================
-
-def formatear_analisis(senal, symbol):
-    data = senal["data_24h"]
-    upper, middle, lower = senal["bollinger"]
-    
-    texto = f"""📊 ANALISIS TECNICO: {symbol}
-
-💰 Precio: ${data['price']:.2f}
-📈 Tendencia: {senal['tendencia']}
-
-*Indicadores:*
-• RSI(14): {senal['rsi']:.1f}
-• SMA 20: ${senal['sma20']:.2f}
-• SMA 50: ${senal['sma50']:.2f}
-• MACD: {senal['macd']:.2f}
-• Señal MACD: {senal['signal_macd']:.2f}
-• VWAP: ${senal['vwap']:.2f}
-• ATR: {senal['atr']:.2f}
-
-*Bollinger Bands:*
-• Superior: ${upper:.2f}
-• Media: ${middle:.2f}
-• Inferior: ${lower:.2f}
-
-🛡️ Soporte: ${senal['soporte']:.2f}
-🏔️ Resistencia: ${senal['resistencia']:.2f}
-
-{senal['emoji']} SEÑAL: {senal['direccion']}
-
-🎯 TP: ${senal['tp']:.2f}
-🛑 SL: ${senal['sl']:.2f}
-📊 Ratio R/B: {senal['rb']:.2f}:1
-
-⏱️ Temporalidad: 1H
-⚠️ Gestion de riesgo obligatoria"""
-    return texto
-
-
-# ===================== FORMATO SOPORTE/RESISTENCIA =====================
-
-def formatear_soporte(senal, symbol):
-    precio = senal["precio"]
-    soporte = senal["soporte"]
-    resistencia = senal["resistencia"]
-    ruptura = senal["ruptura"]
-    
-    texto = f"🛡️ SOPORTE Y RESISTENCIA: {symbol}\n\n"
-    texto += f"💰 Precio: ${precio:.2f}\n"
-    texto += f"🛡️ Soporte: ${soporte:.2f}\n"
-    texto += f"🏔️ Resistencia: ${resistencia:.2f}\n\n"
-    
-    if ruptura == "RUPTURA_ALCISTA":
-        texto += (
-            "🚨 ALERTA: RUPTURA ALCISTA 🚀\n"
-            "El precio HA ROTO la resistencia.\n"
-            "Posible continuacion alcista.\n\n"
-            f"🎯 Proximo objetivo: ${resistencia * 1.02:.2f}"
-        )
-    elif ruptura == "RUPTURA_BAJISTA":
-        texto += (
-            "🚨 ALERTA: RUPTURA BAJISTA 🔻\n"
-            "El precio HA ROTO el soporte.\n"
-            "Posible continuacion bajista.\n\n"
-            f"🎯 Proximo objetivo: ${soporte * 0.98:.2f}"
-        )
-    else:
-        rango = resistencia - soporte
-        posicion = ((precio - soporte) / rango * 100) if rango > 0 else 50
-        texto += (
-            f"✅ Precio DENTRO DEL RANGO\n"
-            f"📊 Amplitud: {rango:.2f} USDT\n"
-            f"📍 Posicion: {posicion:.1f}% del rango\n\n"
-        )
-        if posicion < 30:
-            texto += "💡 Zona de compra (cerca del soporte)"
-        elif posicion > 70:
-            texto += "💡 Zona de venta (cerca de la resistencia)"
-        else:
-            texto += "💡 Zona neutral — esperar ruptura"
-    
-    return texto
-
-
-# ===================== CALCULADORA FUTUROS =====================
-
-def calcular_futuros(precio, monto):
-    if monto <= 0 or precio <= 0:
-        return None
-    
-    if monto < 50:
-        apal_max = 20
-    elif monto < 200:
-        apal_max = 15
-    elif monto < 500:
-        apal_max = 10
-    elif monto < 1000:
-        apal_max = 7
-    elif monto < 5000:
-        apal_max = 5
-    else:
-        apal_max = 3
-    
-    if precio > 50000:
-        factor = 0.7
-    elif precio > 10000:
-        factor = 0.8
-    elif precio > 1000:
-        factor = 0.9
-    else:
-        factor = 1.0
-    
-    apal = max(1, int(apal_max * factor))
-    posicion = monto * apal
-    cantidad = posicion / precio
-    riesgo_usdt = monto * 0.02
-    
-    sl_pct = max(0.5, 2.0 / apal)
-    tp_pct = sl_pct * 2
-    
-    sl_precio = precio * (1 - sl_pct/100)
-    tp_precio = precio * (1 + tp_pct/100)
-    rb = tp_pct / sl_pct
-    
-    if rb < 1.5:
-        recomendacion = "⚠️ Ratio R/B muy bajo. NO opere."
-    else:
-        recomendacion = "✅ Setup valido. Opera con disciplina."
-    
-    return {
-        "precio": precio,
-        "monto": monto,
-        "apalancamiento": apal,
-        "posicion": posicion,
-        "cantidad": cantidad,
-        "riesgo_usdt": riesgo_usdt,
-        "sl_precio": sl_precio,
-        "tp_precio": tp_precio,
-        "sl_pct": sl_pct,
-        "tp_pct": tp_pct,
-        "rb": rb,
-        "recomendacion": recomendacion,
+        "volumen": round(vol_actual, 2),
+        "volumen_prom": vol_promedio,
+        "cambio_24h": round(cambio_24h, 2),
+        "max_24h": round(max_24h, 2),
+        "min_24h": round(min_24h, 2),
+        "vol_24h": round(vol_24h, 2),
+        "apalancamiento": apalancamiento,
+        "riesgo_nivel": riesgo_nivel,
+        "margen": round(margen, 2),
+        "tamaño_posicion": round(tamaño_pos, 2),
+        "stop_loss": round(sl, 2) if sl else 0,
+        "take_profit": round(tp, 2) if tp else 0,
+        "liquidacion": round(liq, 2) if liq else 0,
+        "razones_entrada": razones_entrada,
+        "razones_salida": razones_salida,
+        "hora": datetime.now().strftime("%H:%M:%S")
     }
 
 
-def formatear_futuros(plan):
-    texto = f"""🧮 PLAN DE FUTUROS
+def escanear_todos(timeframe: str = "15min") -> List[Dict]:
+    """Escanea todos los pares y devuelve solo los que tienen señal fuerte"""
+    resultados = []
+    for par in PARES.keys():
+        data = analizar_par(par, timeframe)
+        if data and data["alerta"]:
+            resultados.append(data)
+    return resultados
 
-💰 Precio entrada: ${plan['precio']:.2f}
-💵 Capital: ${plan['monto']:.2f} USDT
 
-⚡ Apalancamiento recomendado: {plan['apalancamiento']}x
-📊 Posicion total: ${plan['posicion']:.2f}
-🪙 Cantidad: {plan['cantidad']:.6f}
+# =============================================================
+# FORMATO DE MENSAJE PARA TELEGRAM
+# =============================================================
 
-🛡️ Gestion de Riesgo:
-• Perdida max (2%): ${plan['riesgo_usdt']:.2f} USDT
-• SL: ${plan['sl_precio']:.2f} ({plan['sl_pct']:.2f}%)
-• TP: ${plan['tp_precio']:.2f} ({plan['tp_pct']:.2f}%)
-• Ratio R/B: {plan['rb']:.2f}:1
+def formatear_mensaje(data: Dict) -> str:
+    """Convierte el análisis en mensaje de Telegram"""
+    par = data["par"]
+    s = data["señal"]
+    d = data["direccion"]
 
-{plan['recomendacion']}
+    if s == "NEUTRAL":
+        titulo = f"{d} <b>SIN SEÑAL - {par}-USDT</b>"
+        cuerpo = f"""
+<i>Mercado lateral. RSI: {data['rsi']}. Sin señal clara. Esperar ruptura.</i>
 
-⚠️ REGLAS OBLIGATORIAS:
-1. Nunca uses mas del 2% de tu cuenta
-2. Si el ratio R/B es menor a 1.5:1, NO opere
-3. Usa stop loss SIEMPRE
-4. No sobre-apalancar por FOMO
-5. Divide tu entrada en 2-3 partes (DCA)
+<b>Condiciones para entrada:</b>
+  • RSI < 30 + EMA alcista + MACD positivo → <b>COMPRA</b>
+  • RSI > 70 + EMA bajista + MACD negativo → <b>VENTA</b>
+"""
+    elif s == "COMPRA":
+        titulo = f"🟢 <b>SEÑAL DE COMPRA - {par}-USDT</b>"
+        cuerpo = f"""
+<b>Precio entrada:</b> <code>${data['precio']:,.2f}</code>
+<b>Confianza:</b> {data['confianza']}% {'█' * int(data['confianza']/10)}{'░' * (10-int(data['confianza']/10))}
 
-🚀 ¡Exito en tu operacion!"""
-    return texto
-        
+<b>Indicadores:</b>
+  • RSI: {data['rsi']} {'(Sobrevendido)' if data['rsi'] < 30 else '(Neutral)'}
+  • EMA9: ${data['ema_rapida']:,.2f} | EMA21: ${data['ema_lenta']:,.2f}
+  • MACD: {data['macd']} (Signal: {data['macd_signal']})
+  • Estocástico: {data['stoch_k']}%
+  • Bollinger: ${data['bb_inf']:,.2f} / ${data['bb_mid']:,.2f} / ${data['bb_sup']:,.2f}
+
+<b>Niveles:</b>
+  • Soporte: ${data['soporte']:,.2f}
+  • Resistencia: ${data['resistencia']:,.2f}
+
+<b>PLAN DE OPERACIÓN (10 USDT):</b>
+  <b>Apalancamiento:</b> <code>{data['apalancamiento']}x</code> (Volatilidad: {data['riesgo_nivel']})
+  <b>Margen requerido:</b> <code>${data['margen']:.2f} USDT</code>
+  <b>Tamaño posición:</b> <code>${data['tamaño_posicion']:.2f} USDT</code>
+
+<b>Stop Loss:</b> <code>${data['stop_loss']:,.2f}</code>
+<b>Take Profit:</b> <code>${data['take_profit']:,.2f}</code>
+<b>Liquidación:</b> <code>${data['liquidacion']:,.2f}</code>
+
+<b>Razones de entrada:</b>
+"""
+        for r in data["razones_entrada"]:
+            cuerpo += f"  ✅ {r}\n"
+
+        if data["razones_salida"]:
+            cuerpo += f"""
+<b>Señales de salida anticipada:</b>
+"""
+            for r in data["razones_salida"]:
+                cuerpo += f"  ⚠️ {r}\n"
+
+    elif s == "VENTA":
+        titulo = f"🔴 <b>SEÑAL DE VENTA - {par}-USDT</b>"
+        cuerpo = f"""
+<b>Precio entrada:</b> <code>${data['precio']:,.2f}</code>
+<b>Confianza:</b> {data['confianza']}% {'█' * int(data['confianza']/10)}{'░' * (10-int(data['confianza']/10))}
+
+<b>Indicadores:</b>
+  • RSI: {data['rsi']} {'(Sobrecomprado)' if data['rsi'] > 70 else '(Neutral)'}
+  • EMA9: ${data['ema_rapida']:,.2f} | EMA21: ${data['ema_lenta']:,.2f}
+  • MACD: {data['macd']} (Signal: {data['macd_signal']})
+  • Estocástico: {data['stoch_k']}%
+  • Bollinger: ${data['bb_inf']:,.2f} / ${data['bb_mid']:,.2f} / ${data['bb_sup']:,.2f}
+
+<b>Niveles:</b>
+  • Soporte: ${data['soporte']:,.2f}
+  • Resistencia: ${data['resistencia']:,.2f}
+
+<b>PLAN DE OPERACIÓN (10 USDT):</b>
+  <b>Apalancamiento:</b> <code>{data['apalancamiento']}x</code> (Volatilidad: {data['riesgo_nivel']})
+  <b>Margen requerido:</b> <code>${data['margen']:.2f} USDT</code>
+  <b>Tamaño posición:</b> <code>${data['tamaño_posicion']:.2f} USDT</code>
+
+<b>Stop Loss:</b> <code>${data['stop_loss']:,.2f}</code>
+<b>Take Profit:</b> <code>${data['take_profit']:,.2f}</code>
+<b>Liquidación:</b> <code>${data['liquidacion']:,.2f}</code>
+
+<b>Razones de entrada:</b>
+"""
+        for r in data["razones_entrada"]:
+            cuerpo += f"  ✅ {r}\n"
+
+        if data["razones_salida"]:
+            cuerpo += f"""
+<b>Señales de salida anticipada:</b>
+"""
+            for r in data["razones_salida"]:
+                cuerpo += f"  ⚠️ {r}\n"
+
+    else:  # DEBIL
+        titulo = f"{d} <b>SEÑAL DÉBIL - {par}-USDT</b>"
+        cuerpo = f"""
+<b>Precio:</b> <code>${data['precio']:,.2f}</code>
+<b>Confianza:</b> {data['confianza']}% (Débil, esperar confirmación)
+
+<b>Indicadores:</b>
+  • RSI: {data['rsi']}
+  • EMA9: ${data['ema_rapida']:,.2f} | EMA21: ${data['ema_lenta']:,.2f}
+  • MACD: {data['macd']}
+
+<b>Recomendación:</b> Esperar más confirmación antes de entrar.
+"""
+
+    pie = f"""
+━━━━━━━━━━━━━━━━━━━━
+<b>GESTIÓN DE RIESGO</b>
+━━━━━━━━━━━━━━━━━━━━
+Temporalidad: {data['timeframe']}
+Gestión de riesgo obligatoria
+Nunca inviertas más del 2%
+
+<i>{data['hora']}</i>
+"""
+
+    return titulo + "\n━━━━━━━━━━━━━━━━━━━━" + cuerpo + pie
+
+
+if __name__ == "__main__":
+    print("Probando análisis de BTC...")
+    resultado = analizar_par("BTC", "15min")
+    if resultado:
+        print(formatear_mensaje(resultado))
+    else:
+        print("No se pudo obtener datos")
+    
