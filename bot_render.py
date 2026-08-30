@@ -4,7 +4,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from analisis import analyze_market, calculate_risk
 
-TOKEN = "8962151587:AAFZkPd73TnVDS_PZVfejFPGb1U_pbdPr1E"
+TOKEN = os.getenv("TELEGRAM_TOKEN", "").replace('\n', '').replace('\r', '').replace(' ', '').strip()
+
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
