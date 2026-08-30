@@ -1,112 +1,408 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+BOT DE SEÑALES DE TRADING - KUCOIN FUTUROS
+Usa analisis.py para indicadores y señales automáticas
+"""
+
 import os
-import telebot
-from flask import Flask, request
-from analisis import get_kucoin_price, analisis_completo, formatear_señal, formatear_analisis, formatear_soporte, calcular_futuros, formatear_futuros
+import sys
+import logging
+from datetime import datetime
 
-TOKEN = "8962151587:AAG1AyLxwREUtTBd-visJBGhAs4CaOzQx1I"
-bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
+from analisis import (
+    analizar_par, escanear_todos, formatear_mensaje,
+    PARES, obtener_velas, obtener_ticker
+)
 
-COINS = {'BTC-USDT':'BTC','ETH-USDT':'ETH','BNB-USDT':'BNB','SOL-USDT':'SOL','XRP-USDT':'XRP'}
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    ContextTypes
+)
 
+TOKEN = os.getenv("BOT_TOKEN", "TU_TOKEN_AQUI")
+
+ALERTA_INTERVALO_MIN = 5
+
+logging.basicConfig(
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 def teclado_principal():
-    markup = telebot.types.InlineKeyboardMarkup()
-    markup.add(telebot.types.InlineKeyboardButton("BTC",callback_data="precio_BTC"), telebot.types.InlineKeyboardButton("ETH",callback_data="precio_ETH"))
-    markup.add(telebot.types.InlineKeyboardButton("SOL",callback_data="precio_SOL"), telebot.types.InlineKeyboardButton("XRP",callback_data="precio_XRP"))
-    return markup
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Señales", callback_data="menu_señales"),
+         InlineKeyboardButton("Análisis Técnico", callback_data="menu_analisis")],
+        [InlineKeyboardButton("Alertas Automáticas", callback_data="menu_alertas"),
+         InlineKeyboardButton("Configuración", callback_data="menu_config")],
+    ])
 
-@app.route('/' + TOKEN, methods=['POST'])
-def webhook():
-    bot.process_new_updates([telebot.types.Update.de_json(request.stream.read().decode("utf-8"))])
-    return "ok", 200
 
-@bot.message_handler(commands=['start'])
-def cmd_start(message):
-    bot.send_message(message.chat.id, "🤖 *BOT TRADING - KUCOIN*\n\n`/precio BTC` → Precio\n`/analisis BTC` → Analisis tecnico\n`/soporte BTC` → Soporte/Resistencia + rupturas\n`/operar BTC` → Señal directa\n`/futuros 65000 100` → Calculadora\n\n⚠️ Bot educativo. Nunca mas del 2%.", parse_mode="Markdown", reply_markup=teclado_principal())
+def teclado_pares():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("BTC", callback_data="par_BTC"),
+         InlineKeyboardButton("ETH", callback_data="par_ETH")],
+        [InlineKeyboardButton("SOL", callback_data="par_SOL"),
+         InlineKeyboardButton("XRP", callback_data="par_XRP")],
+        [InlineKeyboardButton("BNB", callback_data="par_BNB")],
+        [InlineKeyboardButton("Volver", callback_data="volver")],
+    ])
 
-@bot.message_handler(commands=['precio'])
-def cmd_precio(message):
-    try:
-        moneda = message.text.split()[1].upper()
-        data = get_kucoin_price(f"{moneda}-USDT")
-        if not data:
-            bot.send_message(message.chat.id, f"No encontre {moneda}", parse_mode="Markdown")
-            return
-        emoji = "🟢" if data["change24h"] >= 0 else "🔴"
-        bot.send_message(message.chat.id, f"💎 *{moneda}/USDT*\n💰 ${data['price']:,.2f}\n{emoji} 24h: {data['change24h']:+.2f}%\n📈 Max: ${data['high24h']:,.2f}\n📉 Min: ${data['low24h']:,.2f}\n📦 Vol: {data['vol24h']:,.0f}", parse_mode="Markdown")
-    except:
-        bot.send_message(message.chat.id, "❌ Uso: `/precio BTC`", parse_mode="Markdown")
 
-@bot.message_handler(commands=['analisis'])
-def cmd_analisis(message):
-    try:
-        moneda = message.text.split()[1].upper()
-        msg = bot.send_message(message.chat.id, f"Analizando {moneda}...")
-        res = analisis_completo(f"{moneda}-USDT")
-        if not res:
-            bot.edit_message_text(f"Error con {moneda}", chat_id=message.chat.id, message_id=msg.message_id)
-            return
-        bot.edit_message_text(formatear_analisis(res, f"{moneda}/USDT"), chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown")
-    except:
-        bot.send_message(message.chat.id, "❌ Uso: `/analisis BTC`", parse_mode="Markdown")
+def teclado_accion():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Actualizar", callback_data="actualizar"),
+         InlineKeyboardButton("Análisis Completo", callback_data="analisis_full")],
+        [InlineKeyboardButton("Volver", callback_data="volver")],
+    ])
 
-@bot.message_handler(commands=['soporte'])
-def cmd_soporte(message):
-    try:
-        moneda = message.text.split()[1].upper()
-        msg = bot.send_message(message.chat.id, f"Calculando {moneda}...")
-        res = analisis_completo(f"{moneda}-USDT")
-        if not res:
-            bot.edit_message_text(f"Error con {moneda}", chat_id=message.chat.id, message_id=msg.message_id)
-            return
-        bot.edit_message_text(formatear_soporte(res, f"{moneda}/USDT"), chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown")
-    except:
-        bot.send_message(message.chat.id, "❌ Uso: `/soporte BTC`", parse_mode="Markdown")
 
-@bot.message_handler(commands=['operar','señal'])
-def cmd_operar(message):
-    try:
-        moneda = message.text.split()[1].upper()
-        msg = bot.send_message(message.chat.id, f"Generando señal {moneda}...")
-        res = analisis_completo(f"{moneda}-USDT")
-        if not res:
-            bot.edit_message_text(f"Error con {moneda}", chat_id=message.chat.id, message_id=msg.message_id)
-            return
-        bot.edit_message_text(formatear_señal(res, f"{moneda}/USDT"), chat_id=message.chat.id, message_id=msg.message_id, parse_mode="Markdown")
-    except:
-        bot.send_message(message.chat.id, "❌ Uso: `/operar BTC`", parse_mode="Markdown")
-
-@bot.message_handler(commands=['futuros'])
-def cmd_futuros(message):
-    try:
-        partes = message.text.split()
-        plan = calcular_futuros(float(partes[1]), float(partes[2]))
-        if not plan:
-            bot.send_message(message.chat.id, "Error en calculo")
-            return
-        bot.send_message(message.chat.id, formatear_futuros(plan), parse_mode="Markdown")
-    except:
-        bot.send_message(message.chat.id, "❌ Uso: `/futuros 65000 100`", parse_mode="Markdown")
-
-@bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    if call.data.startswith("precio_"):
-        moneda = call.data.split("_")[1].upper()
-        data = get_kucoin_price(f"{moneda}-USDT")
-        if data:
-            emoji = "🟢" if data["change24h"] >= 0 else "🔴"
-            bot.send_message(call.message.chat.id, f"💎 {moneda}/USDT\n💰 ${data['price']:,.2f}\n{emoji} 24h: {data['change24h']:+.2f}%", parse_mode="Markdown")
-    bot.answer_callback_query(call.id)
-
-@app.route('/')
-def index():
-    return "Bot activo", 200
-
-def iniciar_webhook():
-    bot.remove_webhook()
-    bot.set_webhook(url=(os.environ.get('RENDER_EXTERNAL_URL','') + '/' + TOKEN))
-
-if __name__ == '__main__':
-    iniciar_webhook()
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+def teclado_alertas():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("Activar Alertas", callback_data="alertas_on"),
+         InlineKeyboardButton("Detener Alertas", callback_data="alertas_off")],
+        [InlineKeyboardButton("Escanear Ahora", callback_data="escanear")],
+        [InlineKeyboardButton("Volver", callback_data="volver")],
+    ])
+        async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    context.user_data["chat_id"] = update.effective_chat.id
     
+    texto = ("""Bot de Señales - KuCoin Futuros
+    
+Hola """ + user.first_name + """!
+
+Este bot analiza futuros perpetuos en KuCoin y avisa cuando hay oportunidades de entrada y salida.
+
+Capital: 10 USDT
+Mercado: Futuros Perpetuos
+Temporalidad: 15 minutos
+
+Indicadores: RSI, EMA(9/21), MACD, Bollinger, Estocástico, ATR, Volumen
+
+Apalancamiento: Calculado automático según volatilidad (3x a 10x)
+
+Comandos:
+/start - Menu principal
+/operar - Elegir par para operar
+/señal [PAR] - Señal rápida
+/analisis - Análisis multi-temporalidad
+/config - Ver configuración
+
+No es asesoría financiera. Opera bajo tu propio riesgo.""")
+    
+    await update.message.reply_text(texto, reply_markup=teclado_principal())
+
+
+async def operar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data["chat_id"] = update.effective_chat.id
+    context.user_data["timeframe"] = "15min"
+    
+    await update.message.reply_text(
+        "Elige un par para operar:",
+        reply_markup=teclado_pares()
+                             )
+async def señal(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if args and args[0].upper() in PARES:
+        par = args[0].upper()
+        tf = context.user_data.get("timeframe", "15min")
+        await enviar_analisis(update, context, par, tf)
+    else:
+        await update.message.reply_text(
+            "Elige un par:",
+            reply_markup=teclado_pares()
+        )
+
+
+async def analisis_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Análisis Técnico Avanzado\nElige un par:",
+        reply_markup=teclado_pares()
+    )
+
+
+async def config(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    tf = context.user_data.get("timeframe", "15min")
+    alertas = "Activas" if context.user_data.get("alertas_activas") else "Inactivas"
+    
+    texto = ("""Configuración Actual
+    
+Capital base: 10 USDT
+Temporalidad: """ + tf + """
+Alertas: """ + alertas + """
+Pares: BTC, ETH, SOL, XRP, BNB
+
+Indicadores:
+  RSI(14): Sobrecompra 70 / Sobreventa 30
+  EMA: 9 y 21 períodos
+  MACD: (12, 26, 9)
+  Bollinger: 20 períodos, 2σ
+  Estocástico: 14 períodos
+  ATR: 14 períodos
+
+Apalancamiento:
+  Volatilidad < 0.3% -> 10x
+  Volatilidad 0.3-0.6% -> 7x
+  Volatilidad 0.6-1.0% -> 5x
+  Volatilidad > 1.0% -> 3x
+
+Gestión de riesgo:
+  SL: 2x ATR
+  TP: 3x ATR
+  Máximo riesgo: 2% por operación""")
+    
+    await update.message.reply_text(texto)
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    if data == "menu_señales":
+        await query.edit_message_text(
+            "Señales de Trading\nElige un par:",
+            reply_markup=teclado_pares()
+        )
+    
+    elif data == "menu_analisis":
+        await query.edit_message_text(
+            "Análisis Técnico Avanzado\nElige un par:",
+            reply_markup=teclado_pares()
+        )
+    
+    elif data == "menu_alertas":
+        await query.edit_message_text(
+            "Alertas Automáticas\n\n"
+            "El bot revisará el mercado cada 5 minutos "
+            "y te avisará solo cuando haya señales fuertes.",
+            reply_markup=teclado_alertas()
+        )
+    
+    elif data == "menu_config":
+        await config(update, context)
+    
+    elif data.startswith("par_"):
+        par = data.split("_")[1]
+        context.user_data["par_seleccionado"] = par
+        tf = context.user_data.get("timeframe", "15min")
+        
+        msg = await query.edit_message_text(
+            "Analizando " + par + "-USDT en " + tf + "...",
+        )
+        
+        resultado = analizar_par(par, tf)
+        if resultado:
+            mensaje = formatear_mensaje(resultado)
+            await msg.edit_text(
+                mensaje,
+                reply_markup=teclado_accion(),
+                parse_mode="HTML"
+            )
+        else:
+            await msg.edit_text(
+                "Error obteniendo datos de " + par,
+                reply_markup=teclado_pares()
+            )
+    
+    elif data == "actualizar":
+        par = context.user_data.get("par_seleccionado", "BTC")
+        tf = context.user_data.get("timeframe", "15min")
+        
+        msg = await query.edit_message_text(
+            "Actualizando " + par + "-USDT...",
+        )
+        
+        resultado = analizar_par(par, tf)
+        if resultado:
+            mensaje = formatear_mensaje(resultado)
+            await msg.edit_text(
+                mensaje,
+                reply_markup=teclado_accion(),
+                parse_mode="HTML"
+            )
+    
+    elif data == "analisis_full":
+        par = context.user_data.get("par_seleccionado", "BTC")
+        
+        msg = await query.edit_message_text(
+            "Analizando " + par + " en múltiples temporalidades...",
+        )
+        
+        r_15m = analizar_par(par, "15min")
+        r_1h = analizar_par(par, "1hour")
+        
+        if r_15m and r_1h:
+            texto = ("Análisis Multi-Temporalidad - " + par + "\n"
+                     "━━━━━━━━━━━━━━━━━━━━\n\n"
+                     "15 minutos:\n"
+                     "  Señal: " + r_15m['direccion'] + " " + r_15m['señal'] +
+                     " (" + str(r_15m['confianza']) + "%)\n"
+                     "  RSI: " + str(r_15m['rsi']) +
+                     " | Apalancamiento: " + str(r_15m['apalancamiento']) + "x\n\n"
+                     "1 Hora:\n"
+                     "  Señal: " + r_1h['direccion'] + " " + r_1h['señal'] +
+                     " (" + str(r_1h['confianza']) + "%)\n"
+                     "  RSI: " + str(r_1h['rsi']) +
+                     " | Apalancamiento: " + str(r_1h['apalancamiento']) + "x\n\n"
+                     "Recomendación:\n")
+            
+            if r_15m['señal'] == r_1h['señal'] and r_15m['señal'] != "NEUTRAL":
+                apal = min(r_15m['apalancamiento'], r_1h['apalancamiento'])
+                texto += ("ALTA CONFIANZA - Ambas coinciden en " +
+                          r_15m['señal'] + "\n"
+                          "Apalancamiento: " + str(apal) + "x")
+            elif r_1h['señal'] != "NEUTRAL":
+                texto += ("MEDIA CONFIANZA - 1H indica " + r_1h['señal'] +
+                          "\nEsperar confirmación en 15min.")
+            else:
+                texto += "SIN SEÑAL CLARA - NO OPERAR"
+            
+            await msg.edit_text(
+                texto,
+                reply_markup=teclado_accion()
+            )
+        else:
+            await msg.edit_text(
+                "Error en el análisis.",
+                reply_markup=teclado_pares()
+    )
+        elif data == "alertas_on":
+        context.user_data["alertas_activas"] = True
+        chat_id = update.effective_chat.id
+        
+        job_queue = context.application.job_queue
+        current_jobs = job_queue.get_jobs_by_name("alertas_" + str(chat_id))
+        for job in current_jobs:
+            job.schedule_removal()
+        
+        job_queue.run_repeating(
+            job_alerta_automatica,
+            interval=ALERTA_INTERVALO_MIN * 60,
+            first=10,
+            chat_id=chat_id,
+            name="alertas_" + str(chat_id)
+        )
+        
+        await query.edit_message_text(
+            "Alertas activadas\n\n"
+            "El bot revisará el mercado cada 5 minutos "
+            "y te enviará señales solo con confianza > 70%.",
+            reply_markup=teclado_alertas()
+        )
+    
+    elif data == "alertas_off":
+        context.user_data["alertas_activas"] = False
+        chat_id = update.effective_chat.id
+        
+        job_queue = context.application.job_queue
+        current_jobs = job_queue.get_jobs_by_name("alertas_" + str(chat_id))
+        for job in current_jobs:
+            job.schedule_removal()
+        
+        await query.edit_message_text(
+            "Alertas detenidas",
+            reply_markup=teclado_alertas()
+        )
+    
+    elif data == "escanear":
+        msg = await query.edit_message_text(
+            "Escaneando todos los pares...",
+        )
+        
+        resultados = escanear_todos("15min")
+        
+        if resultados:
+            texto = "OPORTUNIDADES DETECTADAS\n━━━━━━━━━━━━━━━━━━━━\n\n"
+            for r in resultados:
+                texto += (r['direccion'] + " " + r['par'] +
+                          " - " + r['señal'] +
+                          " (" + str(r['confianza']) + "%)\n"
+                          "Precio: $" + str(r['precio']) +
+                          " | Apalancamiento: " + str(r['apalancamiento']) + "x\n\n")
+            
+            texto += "\nUsa /señal [PAR] para ver análisis completo."
+            await msg.edit_text(
+                texto,
+                reply_markup=teclado_alertas()
+            )
+        else:
+            await msg.edit_text(
+                "Sin oportunidades claras\n\n"
+                "Ningún par muestra señal fuerte ahora.\n"
+                "El bot te avisará automáticamente cuando aparezca una.",
+                reply_markup=teclado_alertas()
+            )
+    
+    elif data == "volver":
+        await query.edit_message_text(
+            "Bot de Señales - KuCoin Futuros",
+            reply_markup=teclado_principal()
+        )
+
+
+async def job_alerta_automatica(context: ContextTypes.DEFAULT_TYPE):
+    job = context.job
+    chat_id = job.chat_id
+    
+    logger.info("Revisando mercado para chat " + str(chat_id))
+    
+    resultados = escanear_todos("15min")
+    
+    for r in resultados:
+        if r["confianza"] >= 70:
+            mensaje = formatear_mensaje(r)
+            try:
+                await context.bot.send_message(
+                    chat_id=chat_id,
+                    text=mensaje,
+                    parse_mode="HTML"
+                )
+            except Exception as e:
+                logger.error("Error enviando alerta: " + str(e))
+    async def enviar_analisis(update, context, par, tf):
+    msg = await update.message.reply_text(
+        "Analizando " + par + "-USDT en " + tf + "...",
+    )
+    
+    resultado = analizar_par(par, tf)
+    if resultado:
+        mensaje = formatear_mensaje(resultado)
+        await msg.edit_text(
+            mensaje,
+            reply_markup=teclado_accion(),
+            parse_mode="HTML"
+        )
+    else:
+        await msg.edit_text(
+            "No se pudieron obtener datos de " + par,
+            reply_markup=teclado_pares()
+        )
+
+
+def main():
+    if TOKEN == "TU_TOKEN_AQUI":
+        print("ERROR: Configura tu BOT_TOKEN")
+        print("Opcion 1: export BOT_TOKEN='tu_token'")
+        print("Opcion 2: Edita la variable TOKEN en el codigo")
+        sys.exit(1)
+    
+    application = Application.builder().token(TOKEN).build()
+    
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("operar", operar))
+    application.add_handler(CommandHandler("señal", señal))
+    application.add_handler(CommandHandler("analisis", analisis_cmd))
+    application.add_handler(CommandHandler("config", config))
+    application.add_handler(CallbackQueryHandler(callback_handler))
+    
+    print("Bot iniciado!")
+    print("Comandos: /start /operar /señal /analisis /config")
+    print("Alertas automaticas: activables desde el menu")
+    print("Presiona Ctrl+C para detener.\n")
+    
+    application.run_polling(allowed_updates=Update.ALL_TYPES)
+
+
+if __name__ == "__main__":
+    main()
