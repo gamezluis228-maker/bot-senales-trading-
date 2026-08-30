@@ -4,15 +4,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from analisis import analyze_market, calculate_risk
 
-# Leer token desde archivo secret y limpiar saltos de linea
-TOKEN = ""
-try:
-    with open('/etc/secrets/bot_token.txt', 'r') as f:
-        raw = f.read()
-        # Elimina saltos de linea, espacios y une todo
-        TOKEN = raw.replace('\n', '').replace('\r', '').replace(' ', '').strip()
-except:
-    TOKEN = os.getenv("TELEGRAM_TOKEN", "").replace('\n', '').replace('\r', '').replace(' ', '').strip()
+# Leer token y limpiar saltos de linea automaticamente
+TOKEN = os.getenv("TELEGRAM_TOKEN", "").replace('\n', '').replace('\r', '').replace(' ', '').strip()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
