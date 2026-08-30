@@ -4,8 +4,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from analisis import analyze_market, calculate_risk
 
-# Leer token y limpiar saltos de linea automaticamente
-TOKEN = os.getenv("TELEGRAM_TOKEN", "").replace('\n', '').replace('\r', '').replace(' ', '').strip()
+TOKEN = "8962151587:AAFZkPd73TnVDS_PZVfejFPGb1U_pbdPr1E"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
