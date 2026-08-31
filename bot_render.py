@@ -1,11 +1,9 @@
 import os
 import threading
-from flask import Flask
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from analisis import analyze_market, calculate_risk
-
-app = Flask(__name__)
 
 # Leer token y limpiar saltos de linea
 TOKEN = os.getenv("TELEGRAM_TOKEN", "").replace('\n', '').replace('\r', '').replace(' ', '').strip()
@@ -49,28 +47,33 @@ async def risk_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = calculate_risk(capital)
     await update.message.reply_text(result, parse_mode='Markdown')
 
-def run_bot():
-    if not TOKEN:
-        print("❌ Error: No se encontro el token del bot")
-        return
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'text/plain')
+        self.end_headers()
+        self.wfile.write(b"🤖 Bot de Señales de Trading Activo - Running")
+    
+    def log_message(self, format, *args):
+        pass  # Silenciar logs del servidor HTTP
 
-    print("🚀 Bot iniciado correctamente...")
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler(["btc", "eth", "sol", "analisis"], analyze_cmd))
-    application.add_handler(CommandHandler("riesgo", risk_cmd))
-    application.run_polling()
-
-@app.route('/')
-def health():
-    return "🤖 Bot de Señales de Trading Activo - Running"
+def run_web_server():
+    port = int(os.environ.get('PORT', 10000))
+    server = HTTPServer(('0.0.0.0', port), HealthHandler)
+    server.serve_forever()
 
 if __name__ == "__main__":
     if not TOKEN:
         print("❌ Error: No se encontro el token del bot")
     else:
-        # Iniciar bot en un thread de fondo
-        bot_thread = threading.Thread(target=run_bot)
-        bot_thread.start()
-        # Iniciar servidor web para que Render detecte el puerto
-        port = int(os.environ.get('PORT', 10000))
-        app.run(host='0.0.0.0', port=port)
+        # Iniciar servidor web en un thread de fondo
+        web_thread = threading.Thread(target=run_web_server)
+        web_thread.daemon = True
+        web_thread.start()
+        
+        # Iniciar bot en el thread principal (donde asyncio funciona)
+        print("🚀 Bot iniciado correctamente...")
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler(["btc", "eth", "sol", "analisis"], analyze_cmd))
+        application.add_handler(CommandHandler("riesgo", risk_cmd))
+        application.run_polling()
