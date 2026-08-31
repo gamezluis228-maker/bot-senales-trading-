@@ -21,53 +21,47 @@ def calculate_rsi(df, period=14):
     return 100 - (100 / (1 + rs))
 
 def analizar_mercado_symbol(symbol):
-    df_1h = fetch_data(symbol, '1h')
-    df_15m = fetch_data(symbol, '15m')
-    if df_1h is None or df_15m is None:
-        return f"⚠️ Error al conectar con KuCoin para {symbol}."
+    try:
+        formatted_symbol = f"{symbol}/USDT"
+        ticker = exchange.fetch_ticker(formatted_symbol)
+        current_price = ticker.get('last', 0)
+        change_24h = ticker.get('percentage', 0)
+        high_24h = ticker.get('high', 0)
+        low_24h = ticker.get('low', 0)
+        volume_24h = ticker.get('quoteVolume', ticker.get('baseVolume', 0))
+    except Exception:
+        current_price, change_24h, high_24h, low_24h, volume_24h = 0, 0, 0, 0, 0
 
-    current_price = df_15m['close'].iloc[-1]
-    df_15m['rsi'] = calculate_rsi(df_15m)
-    current_rsi = round(df_15m['rsi'].iloc[-1], 2)
+    df_15m = fetch_data(symbol, '15m', limit=50)
+    current_rsi = 50.0
+    if df_15m is not None and not df_15m.empty:
+        df_15m['rsi'] = calculate_rsi(df_15m)
+        if not df_15m['rsi'].empty and not np.isnan(df_15m['rsi'].iloc[-1]):
+            current_rsi = round(df_15m['rsi'].iloc[-1], 1)
 
-    resistance = df_15m['high'].tail(20).max()
-    support = df_15m['low'].tail(20).min()
-
-    df_1h['ema20'] = df_1h['close'].ewm(span=20, adjust=False).mean()
-    macro_bullish = current_price > df_1h['ema20'].iloc[-1]
-
-    if current_price >= resistance and current_rsi > 50 and macro_bullish:
-        signal = "🟢 COMPRA (LONG)"
-        entry = current_price
-        sl = round(entry * 0.985, 2)
-        tp1 = round(entry * 1.015, 2)
-        tp2 = round(entry * 1.030, 2)
-        detail = "Ruptura de Resistencia confirmada en 1H."
-    elif current_price <= support and current_rsi < 50 and not macro_bullish:
-        signal = "🔴 VENTA (SHORT)"
-        entry = current_price
-        sl = round(entry * 1.015, 2)
-        tp1 = round(entry * 0.985, 2)
-        tp2 = round(entry * 0.970, 2)
-        detail = "Ruptura de Soporte confirmada en 1H."
+    # Lógica de estado según RSI / Tendencia
+    if current_rsi > 60:
+        estado = f"🟢 COMPRA - {symbol}-USDT"
+        diagnostico = f"Tendencia alcista. RSI: {current_rsi}. Impulso comprador activo."
+    elif current_rsi < 40:
+        estado = f"🔴 VENTA - {symbol}-USDT"
+        diagnostico = f"Presión bajista. RSI: {current_rsi}. Vigilar soporte cercano."
     else:
-        signal = "⚪ SIN SEÑAL - MERCADO LATERAL"
-        entry, sl, tp1, tp2 = current_price, 0, 0, 0
-        detail = "Mercado en rango. Esperar ruptura."
+        estado = f"⚪ SIN SEÑAL - {symbol}-USDT"
+        diagnostico = f"Mercado lateral. RSI: {current_rsi}. Sin señal clara. Esperar ruptura."
 
-    msg = f"📊 **ANÁLISIS DE MERCADO: {symbol}/USDT**\n\n"
-    msg += f"💵 **Precio Actual:** ${current_price:.2f}\n"
-    msg += f"📈 **RSI (15m):** {current_rsi}\n\n"
-    msg += f"🧱 **Resistencia:** ${resistance:.2f}\n"
-    msg += f"🚧 **Soporte:** ${support:.2f}\n\n"
-    msg += f"🚥 **Estado:** {signal}\n"
-    msg += f"💡 **Diagnóstico:** {detail}\n\n"
+    change_str = f"+{change_24h:.2f}%" if change_24h >= 0 else f"{change_24h:.2f}%"
 
-    if sl != 0:
-        msg += f"📌 **Punto de Entrada:** ${entry:.2f}\n"
-        msg += f"🛑 **Stop Loss (SL):** ${sl:.2f}\n"
-        msg += f"🎯 **Take Profit 1:** ${tp1:.2f}\n"
-        msg += f"🎯 **Take Profit 2:** ${tp2:.2f}\n"
+    msg = f"{estado}\n\n"
+    msg += f"💵 Precio: ${current_price:,.2f}\n"
+    msg += f"📊 Cambio 24h: {change_str}\n"
+    msg += f"📈 Máx 24h: ${high_24h:,.2f}\n"
+    msg += f"📉 Mín 24h: ${low_24h:,.2f}\n"
+    msg += f"📦 Volumen: {volume_24h:,.0f}\n\n"
+    msg += f"{diagnostico}\n\n"
+    msg += f"⏱️ Temporalidad: 15m - 1H\n"
+    msg += f"⚠️ Gestión de riesgo obligatoria\n"
+    msg += f"🚀 Nunca inviertas más del 2%"
 
     return msg
 
@@ -76,12 +70,11 @@ def calcular_riesgo(capital_usdt, sl_percent=1.5):
         capital = float(capital_usdt)
         risk_amount = round(capital * (sl_percent / 100), 2)
         msg = f"🧮 **GESTIÓN DE RIESGO**\n\n"
-        msg += f"💰 **Capital Base:** ${capital:.2f} USDT\n"
+        msg += f"💰 **Capital Base:** ${capital:,.2f} USDT\n"
         msg += f"⚡ **Apalancamiento Sugerido:** 5x - 10x\n"
-        msg += f"📦 **Tamaño de Posición (5x):** ${capital * 5:.2f} USDT\n"
-        msg += f"🛑 **Pérdida Máxima al SL ({sl_percent}%):** -${risk_amount:.2f} USDT\n\n"
+        msg += f"📦 **Tamaño de Posición (5x):** ${capital * 5:,.2f} USDT\n"
+        msg += f"🛑 **Pérdida Máxima al SL ({sl_percent}%):** -${risk_amount:,.2f} USDT\n\n"
         msg += f"⚠️ **Recomendación:** No usar apalancamiento mayor a 10x."
         return msg
     except ValueError:
         return "⚠️ Uso correcto: /riesgo 1000"
-
