@@ -39,7 +39,6 @@ def analizar_mercado_symbol(symbol):
         if not df_15m['rsi'].empty and not np.isnan(df_15m['rsi'].iloc[-1]):
             current_rsi = round(df_15m['rsi'].iloc[-1], 1)
 
-    # Lógica de estado según RSI / Tendencia
     if current_rsi > 60:
         estado = f"🟢 COMPRA - {symbol}-USDT"
         diagnostico = f"Tendencia alcista. RSI: {current_rsi}. Impulso comprador activo."
@@ -64,6 +63,9 @@ def analizar_mercado_symbol(symbol):
     msg += f"🚀 Nunca inviertas más del 2%"
 
     return msg
+
+# Alias para compatibilidad con ambos nombres de funciones
+analyze_market = analizar_mercado_symbol
 
 def calcular_riesgo(capital_usdt, sl_percent=1.5):
     try:
