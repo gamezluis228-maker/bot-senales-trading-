@@ -19,7 +19,8 @@ def run_web_server():
 threading.Thread(target=run_web_server, daemon=True).start()
 
 # Token real y completo de tu bot
-TOKEN = '8962151587:AAFZkPd7TnVDS_PZVFejFPGb1U_pbdPr1E'
+TOKEN = '8962151587:AAFZkPd7TnVDS_PZVFejFPGb1U_pbdPr1E'  # (Aquí va tu token real y limpio)
+
 
 application = Application.builder().token(TOKEN).build()
 
