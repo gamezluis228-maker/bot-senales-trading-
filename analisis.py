@@ -2,11 +2,16 @@ import ccxt
 
 def analizar_mercado_symbol(symbol="BTC/USDT"):
     try:
-        exchange = ccxt.kucoin()
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=50)
+        # Conectar específicamente a los FUTUROS de KuCoin
+        exchange = ccxt.kucoinfutures()
+        
+        # El formato para futuros perpetuos en KuCoin con CCXT lleva ':USDT'
+        target_symbol = f"{symbol}:USDT" if ":USDT" not in symbol else symbol
+        
+        ohlcv = exchange.fetch_ohlcv(target_symbol, timeframe='1h', limit=50)
         
         if not ohlcv or len(ohlcv) < 20:
-            return f"⚠️ No hay suficientes datos en KuCoin para {symbol}."
+            return f"⚠️ No hay suficientes datos en Futuros de KuCoin para {symbol}."
 
         cierres = [vela[4] for vela in ohlcv]
         precio_actual = cierres[-1]
@@ -30,44 +35,44 @@ def analizar_mercado_symbol(symbol="BTC/USDT"):
         resistencia = max(maximos)
         soporte = min(minimos)
 
-        # Definir niveles según el RSI y precio
+        # Definir niveles de entrada, Stop Loss y Take Profit para Futuros
         if rsi < 40:
-            accion = "🟢 COMPRA RECOMENDADA (LONG)"
+            accion = "🟢 COMPRA / LONG (Sobreventa en Futuros)"
             sl = round(precio_actual * 0.985, 2)
             tp = round(precio_actual * 1.03, 2)
-            estrategia = f"• **Entrada:** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl:,.2f}\n• **Take Profit (TP):** ${tp:,.2f}"
+            estrategia = f"• **Entrada (Long):** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl:,.2f}\n• **Take Profit (TP):** ${tp:,.2f}"
         elif rsi > 60:
-            accion = "🔴 VENTA RECOMENDADA (SHORT)"
+            accion = "🔴 VENTA / SHORT (Sobrecompra en Futuros)"
             sl = round(precio_actual * 1.015, 2)
             tp = round(precio_actual * 0.97, 2)
-            estrategia = f"• **Entrada:** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl:,.2f}\n• **Take Profit (TP):** ${tp:,.2f}"
+            estrategia = f"• **Entrada (Short):** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl:,.2f}\n• **Take Profit (TP):** ${tp:,.2f}"
         else:
             accion = "⏳ MERCADO LATERAL / ESPERAR"
-            estrategia = "• Sin señal clara de entrada. Esperar ruptura de soporte o resistencia."
+            estrategia = "• Sin señal clara en el libro de futuros. Esperar ruptura."
 
         mensaje = (
-            f"📊 **ANÁLISIS KUCOIN: {symbol}**\n\n"
-            f"💵 **Precio Actual:** ${precio_actual:,.2f}\n"
+            f"⚡ **FUTUROS KUCOIN: {symbol}**\n\n"
+            f"💵 **Precio de Index/Mark:** ${precio_actual:,.2f}\n"
             f"📈 **RSI (1H):** {rsi:.1f}\n\n"
             f"🧱 **Resistencia:** ${resistencia:,.2f}\n"
             f"🟡 **Soporte:** ${soporte:,.2f}\n\n"
-            f"🎯 **ESTRATEGIA:**\n{accion}\n{estrategia}\n\n"
-            f"⚠️ *Gestiona tu riesgo adecuadamente (Max 2%).*"
+            f"🎯 **SEÑAL DE APALANCAMIENTO:**\n{accion}\n{estrategia}\n\n"
+            f"⚠️ *Usa gestión de riesgo y apalancamiento moderado.*"
         )
         return mensaje
 
     except Exception as e:
-        return f"❌ Error al analizar en KuCoin: {str(e)}"
+        return f"❌ Error al conectar con Futuros de KuCoin: {str(e)}"
 
 def calcular_riesgo(capital_usdt, sl_porcentaje=2):
     try:
         capital = float(capital_usdt)
         riesgo_usd = capital * (sl_porcentaje / 100)
         return (
-            f"🧮 **GESTIÓN DE RIESGO**\n\n"
+            f"🧮 **GESTIÓN DE RIESGO (FUTUROS)**\n\n"
             f"💰 **Capital:** ${capital:,.2f}\n"
             f"🛡️ **Riesgo Máximo ({sl_porcentaje}%):** ${riesgo_usd:,.2f}\n"
-            f"💡 *Protege tu capital operando con disciplina.*"
+            f"💡 *Ajusta tu apalancamiento para que tu liquidación esté lejos del Stop Loss.*"
         )
     except ValueError:
         return "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 1000`"
