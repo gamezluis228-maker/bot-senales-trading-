@@ -77,3 +77,23 @@ if __name__ == "__main__":
         application.add_handler(CommandHandler(["btc", "eth", "sol", "analisis"], analyze_cmd))
         application.add_handler(CommandHandler("riesgo", risk_cmd))
         application.run_polling()
+if __name__ == "__main__":
+    if not TOKEN:
+        print("❌ Error: No se encontro el token del bot")
+    else:
+        # 1. Arrancar servidor web en segundo plano para cumplir con Render
+        web_thread = threading.Thread(target=run_web_server)
+        web_thread.daemon = True
+        web_thread.start()
+        
+        print("🚀 Bot iniciado correctamente con botones interactivos...")
+        
+        # 2. Registrar los comandos
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler(["btc", "eth", "sol", "bnb", "xrp", "analisis"], analyze_cmd))
+        application.add_handler(CommandHandler("riesgo", risk_cmd))
+        application.add_handler(CallbackQueryHandler(button_handler))
+        
+        # 3. Arrancar el bot de Telegram (Esto es lo que mantiene el bot vivo escuchando mensajes)
+        application.run_polling()
+        
