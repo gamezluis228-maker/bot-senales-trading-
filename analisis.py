@@ -1,84 +1,98 @@
 import ccxt
-import pandas as pd
-import numpy as np
 
-exchange = ccxt.kucoin({'enableRateLimit': True})
-
-def fetch_data(symbol, timeframe, limit=100):
+def analizar_mercado_symbol(symbol="BTC/USDT"):
     try:
-        formatted_symbol = f"{symbol}/USDT"
-        ohlcv = exchange.fetch_ohlcv(formatted_symbol, timeframe=timeframe, limit=limit)
-        return pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        # Conectar con KuCoin mediante CCXT para obtener datos reales del mercado
+        exchange = ccxt.kucoin()
+        
+        # Obtener las últimas velas (Timeframe de 1 hora para análisis técnico)
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe='1h', limit=50)
+        
+        if not ohlcv or len(ohlcv) < 20:
+            return f"⚠️ No se pudieron obtener suficientes datos de KuCoin para {symbol}."
+
+        # Extraer precios de cierre
+        cierres = [vela[4] for vela in ohlcv]
+        precio_actual = cierres[-1]
+        
+        # Calcular un RSI básico de forma interna
+        cambios = [cierres[i] - cierres[i-1] for i in range(1, len(cierres))]
+        ganancias = [c if c > 0 else 0 for c in cambios]
+        perdidas = [-c if c < 0 else 0 for c in cambios]
+        
+        avg_ganancia = sum(ganancias[-14:]) / 14 if len(ganancias) >= 14 else 1
+        avg_perdida = sum(perdidas[-14:]) / 14 if len(perdidas) >= 14 else 1
+        
+        if avg_perdida == 0:
+            rsi = 100
+        else:
+            rs = avg_ganancia / avg_perdida
+            rsi = 100 - (100 / (1 + rs))
+
+        # Calcular soportes y resistencias dinámicos basados en máximos y mínimos recientes
+        maximos = [vela[2] for vela in ohlcv[-20:]]
+        minimos = [vela[1] for vela in ohlcv[-20:]]
+        resistencia = max(maximos)
+        soporte = min(minimos)
+
+        # Lógica de recomendación de Trading basada en RSI y Acción de Precio
+        accion = "⏳ ESPERAR (Mercado Lateral / Sin dirección clara)"
+        estrategia = "El precio se encuentra operando en rango. Se recomienda esperar la ruptura de soportes o resistencias."
+        
+        # Distancias aproximadas para Stop Loss y Take Profit
+        sl_compra = round(precio_actual * 0.985, 2)  # 1.5% abajo
+        tp_compra = round(precio_actual * 1.03, 2)   # 3% arriba
+        
+        sl_venta = round(precio_actual * 1.015, 2)   # 1.5% arriba
+        tp_venta = round(precio_actual * 0.97, 2)    # 3% abajo
+
+        if rsi < 35:
+            accion = "🟢 COMPRAR (LONG) - Sobreventa"
+            estrategia = (
+                f"• **Señal:** Posible rebote alcista por sobreventa en KuCoin.\n"
+                f"• **Zona de Entrada:** ${precio_actual:,.2f}\n"
+                f"• **Stop Loss (SL):** ${sl_compra:,.2f}\n"
+                f"• **Take Profit (TP):** ${tp_compra:,.2f}"
+            )
+        elif rsi > 65:
+            accion = "🔴 VENDER (SHORT) - Sobrecompra"
+            estrategia = (
+                f"• **Señal:** Posible caída o corrección por sobrecompra.\n"
+                f"• **Zona de Entrada:** ${precio_actual:,.2f}\n"
+                f"• **Stop Loss (SL):** ${sl_venta:,.2f}\n"
+                f"• **Take Profit (TP):** ${tp_venta:,.2f}"
+            )
+
+        # Construir el mensaje final limpio y profesional
+        mensaje = (
+            f"📊 **ANÁLISIS INTELIGENTE KUCOIN: {symbol}**\n\n"
+            f"💵 **Precio Actual:** ${precio_actual:,.2f}\n"
+            f"📈 **RSI (1H):** {rsi:.1f}\n\n"
+            f"🧱 **Resistencia:** ${resistencia:,.2f}\n"
+            f"🟡 **Soporte:** ${soporte:,.2f}\n\n"
+            f"🎯 **RECOMENDACIÓN:**\n{accion}\n\n"
+            f"{estrategia}\n\n"
+            f"⚠️ *Gestiona siempre tu riesgo adecuadamente.*"
+        )
+        return mensaje
+
     except Exception as e:
-        print(f"Error fetching data for {symbol}: {e}")
-        return None
+        return f"❌ Error al conectar con KuCoin: {str(e)}"
 
-def calculate_rsi(df, period=14):
-    delta = df['close'].diff()
-    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-    rs = gain / loss
-    return 100 - (100 / (1 + rs))
-
-def analizar_mercado_symbol(symbol):
-    try:
-        formatted_symbol = f"{symbol}/USDT"
-        ticker = exchange.fetch_ticker(formatted_symbol)
-        current_price = ticker.get('last', 0)
-        change_24h = ticker.get('percentage', 0)
-        high_24h = ticker.get('high', 0)
-        low_24h = ticker.get('low', 0)
-        volume_24h = ticker.get('quoteVolume', ticker.get('baseVolume', 0))
-    except Exception:
-        current_price, change_24h, high_24h, low_24h, volume_24h = 0, 0, 0, 0, 0
-
-    df_15m = fetch_data(symbol, '15m', limit=50)
-    current_rsi = 50.0
-    if df_15m is not None and not df_15m.empty:
-        df_15m['rsi'] = calculate_rsi(df_15m)
-        if not df_15m['rsi'].empty and not np.isnan(df_15m['rsi'].iloc[-1]):
-            current_rsi = round(df_15m['rsi'].iloc[-1], 1)
-
-    if current_rsi > 60:
-        estado = f"🟢 COMPRA - {symbol}-USDT"
-        diagnostico = f"Tendencia alcista. RSI: {current_rsi}. Impulso comprador activo."
-    elif current_rsi < 40:
-        estado = f"🔴 VENTA - {symbol}-USDT"
-        diagnostico = f"Presión bajista. RSI: {current_rsi}. Vigilar soporte cercano."
-    else:
-        estado = f"⚪ SIN SEÑAL - {symbol}-USDT"
-        diagnostico = f"Mercado lateral. RSI: {current_rsi}. Sin señal clara. Esperar ruptura."
-
-    change_str = f"+{change_24h:.2f}%" if change_24h >= 0 else f"{change_24h:.2f}%"
-
-    msg = f"{estado}\n\n"
-    msg += f"💵 Precio: ${current_price:,.2f}\n"
-    msg += f"📊 Cambio 24h: {change_str}\n"
-    msg += f"📈 Máx 24h: ${high_24h:,.2f}\n"
-    msg += f"📉 Mín 24h: ${low_24h:,.2f}\n"
-    msg += f"📦 Volumen: {volume_24h:,.0f}\n\n"
-    msg += f"{diagnostico}\n\n"
-    msg += f"⏱️ Temporalidad: 15m - 1H\n"
-    msg += f"⚠️ Gestión de riesgo obligatoria\n"
-    msg += f"🚀 Nunca inviertas más del 2%"
-
-    return msg
-
-# Alias para compatibilidad con ambos nombres de funciones
-analyze_market = analizar_mercado_symbol
-
-def calcular_riesgo(capital_usdt, sl_percent=1.5):
+# Alias de compatibilidad por si el bot llama a calculate_risk o calcular_riesgo
+def calcular_riesgo(capital_usdt, sl_porcentaje=2):
     try:
         capital = float(capital_usdt)
-        risk_amount = round(capital * (sl_percent / 100), 2)
-        msg = f"🧮 **GESTIÓN DE RIESGO**\n\n"
-        msg += f"💰 **Capital Base:** ${capital:,.2f} USDT\n"
-        msg += f"⚡ **Apalancamiento Sugerido:** 5x - 10x\n"
-        msg += f"📦 **Tamaño de Posición (5x):** ${capital * 5:,.2f} USDT\n"
-        msg += f"🛑 **Pérdida Máxima al SL ({sl_percent}%):** -${risk_amount:,.2f} USDT\n\n"
-        msg += f"⚠️ **Recomendación:** No usar apalancamiento mayor a 10x."
+        riesgo_usd = capital * (sl_porcentaje / 100)
+        msg = (
+            f"🧮 **GESTIÓN DE RIESGO**\n\n"
+            f"💰 **Capital Base:** ${capital:,.2f}\n"
+            f"🛡️ **Riesgo por operación ({sl_porcentaje}%):** ${riesgo_usd:,.2f}\n"
+            f"💡 *Recomendación:* No arriesgues más del 2% de tu cuenta total por posición."
+        )
         return msg
     except ValueError:
-        return "⚠️ Uso correcto: /riesgo 1000"
-# Alias para que reconozca calculate_risk en inglés
+        return "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 1000`"
+
 calculate_risk = calcular_riesgo
+analyze_market = analizar_mercado_symbol
