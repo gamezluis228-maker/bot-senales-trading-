@@ -19,8 +19,8 @@ def run_web_server():
 # Iniciar servidor web en segundo plano para abrir el puerto de Render
 threading.Thread(target=run_web_server, daemon=True).start()
 
-# Token directo y limpio de Telegram
-TOKEN = '8962151587:AAEtHJvaDuEdThn20jTU6pCtZjjZtS1'
+# Token real y completo de tu bot de Telegram (@mibotxrp_bot)
+TOKEN = '8962151587:AAFZkPd7TnVDS_PZVFejFPGb1U_pbdPr1E'
 
 application = Application.builder().token(TOKEN).build()
 
