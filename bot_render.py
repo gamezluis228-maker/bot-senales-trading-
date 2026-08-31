@@ -2,10 +2,9 @@ import os
 import threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler
+from telegram.ext import Application, CommandHandler
 from analisis import analyze_market, calculate_risk
 
-# --- 1. SERVIDOR WEB OBLIGATORIO PARA RENDER (¡Primero el puerto!) ---
 class SimpleHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -17,36 +16,30 @@ def run_web_server():
     server = HTTPServer(("0.0.0.0", port), SimpleHandler)
     server.serve_forever()
 
-# Arrancar el servidor web inmediatamente en segundo plano para abrir el puerto
+# Iniciar servidor web para abrir el puerto de Render inmediatamente
 web_thread = threading.Thread(target=run_web_server)
 web_thread.daemon = True
 web_thread.start()
 
-# --- 2. CONFIGURACIÓN DEL TOKEN DIRECTO ---
+# Token directo blindado
 TOKEN = "8962151587:AAEtHJvaDuEdThn20jTU6pCtZjjZtS1"
 
-# Crear aplicación de Telegram
 application = Application.builder().token(TOKEN).build()
 
-# --- 3. COMANDOS DEL BOT ---
 async def start(update: Update, context):
     welcome_text = (
         "🤖 **¡Bot de Señales de Trading KuCoin Activo!**\n\n"
-        "Comandos disponibles:\n"
+        "Comandos:\n"
         "• `/btc` - Análisis técnico y señal de Bitcoin\n"
         "• `/eth` - Análisis técnico y señal de Ethereum\n"
         "• `/sol` - Análisis técnico y señal de Solana\n"
-        "• `/riesgo <CAPITAL>` - Calculadora de gestión de riesgo\n"
+        "• `/riesgo <CAPITAL>` - Gestión de riesgo\n"
     )
     await update.message.reply_text(welcome_text, parse_mode="Markdown")
 
 async def analyze_cmd(update: Update, context):
     query = "".join(context.args).upper() if context.args else update.message.text.replace("/", "").upper()
-    if query in ["BTC", "ETH", "SOL"]:
-        symbol = f"{query}/USDT"
-    else:
-        symbol = "BTC/USDT"
-    
+    symbol = f"{query}/USDT" if query in ["BTC", "ETH", "SOL"] else "BTC/USDT"
     await update.message.reply_text(f"🔍 Analizando mercado en KuCoin para {symbol}...")
     resultado = analyze_market(symbol)
     await update.message.reply_text(resultado, parse_mode="Markdown")
@@ -59,16 +52,9 @@ async def risk_cmd(update: Update, context):
     resultado = calculate_risk(capital, 2)
     await update.message.reply_text(resultado, parse_mode="Markdown")
 
-# --- 4. EJECUCIÓN PRINCIPAL ---
 if __name__ == "__main__":
-    print("🚀 Iniciando bot de Telegram con análisis de KuCoin...")
-    
-    # Registrar comandos
+    print("🚀 Iniciando bot...")
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler(["btc", "eth", "sol", "analisis"], analyze_cmd))
     application.add_handler(CommandHandler("riesgo", risk_cmd))
-    
-    # Arrancar polling
     application.run_polling()
-    
-    
