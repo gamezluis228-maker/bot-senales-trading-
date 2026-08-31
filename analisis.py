@@ -80,3 +80,5 @@ def calcular_riesgo(capital_usdt, sl_percent=1.5):
         return msg
     except ValueError:
         return "⚠️ Uso correcto: /riesgo 1000"
+# Alias para que reconozca calculate_risk en inglés
+calculate_risk = calcular_riesgo
