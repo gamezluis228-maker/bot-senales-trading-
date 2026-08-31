@@ -1,11 +1,17 @@
 import os
-import asyncio
+import threading
+from flask import Flask
 from telegram import Update
 from telegram.ext import Application, CommandHandler, ContextTypes
 from analisis import analyze_market, calculate_risk
 
+app = Flask(__name__)
+
+# Leer token y limpiar saltos de linea
 TOKEN = os.getenv("TELEGRAM_TOKEN", "").replace('\n', '').replace('\r', '').replace(' ', '').strip()
 
+# Crear aplicacion del bot
+application = Application.builder().token(TOKEN).build()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
@@ -43,19 +49,28 @@ async def risk_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     result = calculate_risk(capital)
     await update.message.reply_text(result, parse_mode='Markdown')
 
-def main():
+def run_bot():
     if not TOKEN:
         print("❌ Error: No se encontro el token del bot")
         return
 
     print("🚀 Bot iniciado correctamente...")
-    application = Application.builder().token(TOKEN).build()
-    
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler(["btc", "eth", "sol", "analisis"], analyze_cmd))
     application.add_handler(CommandHandler("riesgo", risk_cmd))
-    
     application.run_polling()
 
+@app.route('/')
+def health():
+    return "🤖 Bot de Señales de Trading Activo - Running"
+
 if __name__ == "__main__":
-    main()
+    if not TOKEN:
+        print("❌ Error: No se encontro el token del bot")
+    else:
+        # Iniciar bot en un thread de fondo
+        bot_thread = threading.Thread(target=run_bot)
+        bot_thread.start()
+        # Iniciar servidor web para que Render detecte el puerto
+        port = int(os.environ.get('PORT', 10000))
+        app.run(host='0.0.0.0', port=port)
