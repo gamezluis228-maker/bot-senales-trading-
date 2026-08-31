@@ -10,7 +10,7 @@ def fetch_data(symbol, timeframe, limit=100):
         ohlcv = exchange.fetch_ohlcv(formatted_symbol, timeframe=timeframe, limit=limit)
         return pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"Error fetching data for {symbol}: {e}")
         return None
 
 def calculate_rsi(df, period=14):
@@ -20,11 +20,11 @@ def calculate_rsi(df, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
-def analyze_market(symbol):
+def analizar_mercado_symbol(symbol):
     df_1h = fetch_data(symbol, '1h')
     df_15m = fetch_data(symbol, '15m')
     if df_1h is None or df_15m is None:
-        return "⚠️ Error al conectar con KuCoin."
+        return f"⚠️ Error al conectar con KuCoin para {symbol}."
 
     current_price = df_15m['close'].iloc[-1]
     df_15m['rsi'] = calculate_rsi(df_15m)
@@ -71,7 +71,7 @@ def analyze_market(symbol):
 
     return msg
 
-def calculate_risk(capital_usdt, sl_percent=1.5):
+def calcular_riesgo(capital_usdt, sl_percent=1.5):
     try:
         capital = float(capital_usdt)
         risk_amount = round(capital * (sl_percent / 100), 2)
@@ -83,4 +83,5 @@ def calculate_risk(capital_usdt, sl_percent=1.5):
         msg += f"⚠️ **Recomendación:** No usar apalancamiento mayor a 10x."
         return msg
     except ValueError:
-        return "⚠️ Uso correcto: /riesgo 20"
+        return "⚠️ Uso correcto: /riesgo 1000"
+
