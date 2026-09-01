@@ -110,7 +110,6 @@ def background_auto_analyzer():
                 resultado_btc = analyze_market("BTC/USDT")
                 bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
         except Exception as e:
-            # Protegemos el hilo automático para que un fallo de red no apague el ciclo de los 15 min
             print(f"Error en tarea automática: {e}")
         time.sleep(900)
 
@@ -118,12 +117,13 @@ def run_telegram_bot():
     time.sleep(3)
     while True:
         try:
-            print("Limpiando webhooks y arrancando polling de Telegram...")
+            print("Limpiando webhooks y sesiones previas de Telegram...")
             bot.remove_webhook()
-            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+            # skip_pending=True descarta peticiones viejas colgadas y evita el Error 409
+            bot.infinity_polling(timeout=20, long_polling_timeout=10, skip_pending=True)
         except Exception as e:
-            print(f"Reconectando por conflicto temporal: {e}")
-            time.sleep(5)
+            print(f"Conflicto o desconexión detectada. Reintentando en 15 segundos... Detalles: {e}")
+            time.sleep(15)
 
 if __name__ == '__main__':
     hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
