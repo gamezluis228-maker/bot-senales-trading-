@@ -2,8 +2,8 @@ import time
 import telebot
 from analisis import analyze_market, calculate_risk, radar_market
 
-TOKEN = "7983691656:AAHEfXF1W2x1W2x... (tu token real)"
-TU_CHAT_ID = "tu_chat_id_real"
+TOKEN = "TU_TOKEN_DE_TELEGRAM"
+TU_CHAT_ID = "TU_CHAT_ID"
 
 bot = telebot.TeleBot(TOKEN)
 
@@ -45,13 +45,13 @@ def handle_riesgo(message):
 
 @bot.message_handler(commands=['radar'])
 def handle_radar(message):
-    bot.reply_to(message, "📡 *Escaneando altcoins en KuCoin...*", parse_mode='Markdown')
+    bot.reply_to(message, "📡 *Escaneando el mercado institucional...*", parse_mode='Markdown')
     resultado_radar = radar_market()
     
     if resultado_radar:
         bot.reply_to(message, resultado_radar, parse_mode='Markdown')
     else:
-        bot.reply_to(message, "📡 **RADAR DE MERCADO**: Ninguna altcoin cumple con los filtros estrictos en este momento. Mercado en calma.", parse_mode='Markdown')
+        bot.reply_to(message, "📡 **RADAR DE MERCADO**: Las altcoins están en rango o sin suficiente volumen institucional en este momento.", parse_mode='Markdown')
 
 def background_auto_analyzer():
     time.sleep(30)
@@ -72,4 +72,11 @@ if __name__ == '__main__':
     hilo_auto.start()
     
     print("Bot iniciado correctamente y escuchando...")
-    bot.infinity_polling()
+    
+    # Bucle blindado para reconectar automáticamente ante cualquier conflicto temporal de Telegram
+    while True:
+        try:
+            bot.infinity_polling(timeout=10, long_polling_timeout=5)
+        except Exception as e:
+            print(f"Reconectando por conflicto temporal: {e}")
+            time.sleep(5)
