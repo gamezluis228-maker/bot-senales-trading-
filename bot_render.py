@@ -5,7 +5,7 @@ import telebot
 from flask import Flask
 from analisis import analyze_market, calculate_risk, radar_market
 
-TOKEN = "7983691656:AAHEfXF1W2x1W2x..."  # Tu token real
+TOKEN = "7983691656:AAHEfXF1W2x1W2x..."  # Reemplaza esto con tu token completo de BotFather sin dejar puntos suspensivos al final
 TU_CHAT_ID = "tu_chat_id_real"           # Tu chat ID real
 
 bot = telebot.TeleBot(TOKEN)
@@ -76,7 +76,8 @@ def background_auto_analyzer():
 def run_telegram_bot():
     while True:
         try:
-            print("Iniciando polling de Telegram...")
+            print("Limpiando webhooks y arrancando polling...")
+            bot.remove_webhook()
             bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
             print(f"Reconectando por conflicto temporal: {e}")
