@@ -4,7 +4,7 @@ from flask import Flask
 import telebot
 from analisis import analyze_market, calculate_risk, radar_market
 
-# 1. Servidor Flask obligatorio para que Render no mate el servicio
+# 1. Servidor Flask para cumplir con el requisito de Web Service de Render
 app = Flask(__name__)
 
 @app.route('/')
@@ -29,13 +29,11 @@ def handle_radar(message):
     resultado_radar = radar_market()
     bot.reply_to(message, resultado_radar, parse_mode='Markdown')
 
-# 3. Ejecución concurrente (Flask en hilo + Bot con skip_pending)
+# 3. Ejecución concurrente (Flask en hilo secundario + Bot con skip_pending)
 if __name__ == '__main__':
-    # Arrancamos Flask en un hilo secundario para cumplir con Render
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
     
     print("🤖 Bot privado iniciado y operando 24/7...")
-    # skip_pending=True descarta cualquier sesión colgada anterior
     bot.infinity_polling(skip_pending=True)
