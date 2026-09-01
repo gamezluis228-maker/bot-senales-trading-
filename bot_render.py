@@ -7,7 +7,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 from analisis import analyze_market, calculate_risk, radar_market
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TU_CHAT_ID = os.environ.get("CHAT_ID", "tu_chat_id_real")
+TU_CHAT_ID = "7115547861"  # Chat ID configurado directamente
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -103,7 +103,7 @@ def background_auto_analyzer():
     time.sleep(30)
     while True:
         try:
-            if TU_CHAT_ID and TU_CHAT_ID != "tu_chat_id_real":
+            if TU_CHAT_ID:
                 bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (15M)**\n*Revisando pulso de Bitcoin...*", parse_mode='Markdown')
                 resultado_btc = analyze_market("BTC/USDT")
                 bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
@@ -117,7 +117,6 @@ def run_telegram_bot():
         try:
             print("Iniciando conexión con Telegram...")
             bot.remove_webhook()
-            # Bucle blindado con reconexión automática si Telegram bota la sesión
             bot.infinity_polling(timeout=60, long_polling_timeout=30, skip_pending=True)
         except Exception as e:
             print(f"⚠️ El bot de Telegram se desconectó: {e}")
