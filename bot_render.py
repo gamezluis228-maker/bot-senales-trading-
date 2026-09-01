@@ -5,9 +5,8 @@ import telebot
 from flask import Flask
 from analisis import analyze_market, calculate_risk, radar_market
 
-# Lee el token directamente de las variables de entorno de Render
-TOKEN = os.environ.get("TELEGRAM_TOKEN")  # Asegúrate de que la Key en Render se llame exactamente TELEGRAM_TOKEN (o cámbiala aquí si pusiste otro nombre)
-TU_CHAT_ID = "tu_chat_id_real"           # Tu chat ID real
+TOKEN = os.environ.get("TELEGRAM_TOKEN")
+TU_CHAT_ID = os.environ.get("CHAT_ID", "tu_chat_id_real")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -66,18 +65,19 @@ def background_auto_analyzer():
     time.sleep(30)
     while True:
         try:
-            bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (15M)**\n*Revisando pulso de Bitcoin...*", parse_mode='Markdown')
-            resultado_btc = analyze_market("BTC/USDT")
-            bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
+            if TU_CHAT_ID and TU_CHAT_ID != "tu_chat_id_real":
+                bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (15M)**\n*Revisando pulso de Bitcoin...*", parse_mode='Markdown')
+                resultado_btc = analyze_market("BTC/USDT")
+                bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
         except Exception as e:
             print(f"Error en tarea automática: {e}")
-        
         time.sleep(900)
 
 def run_telegram_bot():
+    time.sleep(3) # Espera a que Flask estabilice el puerto
     while True:
         try:
-            print("Limpiando webhooks y arrancando polling...")
+            print("Limpiando webhooks y arrancando polling de Telegram...")
             bot.remove_webhook()
             bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
@@ -85,16 +85,13 @@ def run_telegram_bot():
             time.sleep(5)
 
 if __name__ == '__main__':
-    # Hilo para el reporte automático de BTC cada 15 minutos
-    hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
-    hilo_auto.start()
-    
-    # Hilo separado para que Telegram escuche comandos de forma continua
+    # Lanzamos el bot de Telegram y el reporte en hilos daemon antes de iniciar Flask
     hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
     hilo_bot.start()
     
-    print("Servidores e hilos iniciados correctamente...")
+    hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
+    hilo_auto.start()
     
-    # Flask se queda en el hilo principal manteniendo el puerto 10000 vivo para Render
+    print("Hilos iniciados. Levantando servidor web Flask...")
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
