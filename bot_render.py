@@ -1,5 +1,6 @@
 import os
 import time
+import datetime
 import threading
 import telebot
 from flask import Flask
@@ -100,16 +101,30 @@ def callback_query(call):
         print(f"Error en callback: {e}")
 
 def background_auto_analyzer():
-    time.sleep(30)
+    # Pequeña pausa inicial al arrancar el bot
+    time.sleep(10)
     while True:
         try:
+            # Sincronización matemática con el cierre exacto de la vela de 15 minutos
+            now = datetime.datetime.now()
+            current_minute = now.minute
+            current_second = now.second
+            
+            remainder = 15 - (current_minute % 15)
+            seconds_to_wait = (remainder * 60) - current_second
+            if seconds_to_wait <= 0:
+                seconds_to_wait += 900
+                
+            print(f"⏰ Esperando {seconds_to_wait} segundos para sincronizar con el cierre de la vela de 15m...")
+            time.sleep(seconds_to_wait)
+            
             if TU_CHAT_ID:
-                bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (15M)**\n*Revisando pulso de Bitcoin...*", parse_mode='Markdown')
+                bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (Cierre Vela 15M)**\n*Analizando pulso de Bitcoin al cierre de vela...*", parse_mode='Markdown')
                 resultado_btc = analyze_market("BTC/USDT")
                 bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
         except Exception as e:
             print(f"Error en tarea automática: {e}")
-        time.sleep(900)
+            time.sleep(60)
 
 def run_telegram_bot():
     time.sleep(3)
