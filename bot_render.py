@@ -5,8 +5,8 @@ import telebot
 from flask import Flask
 from analisis import analyze_market, calculate_risk, radar_market
 
-TOKEN = "7983691656:AAHEfXF1W2x1W2x..."  # Mantén tu token real aquí
-TU_CHAT_ID = "tu_chat_id_real"           # Mantén tu chat ID real aquí
+TOKEN = "7983691656:AAHEfXF1W2x1W2x..."  # Tu token real
+TU_CHAT_ID = "tu_chat_id_real"           # Tu chat ID real
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -87,10 +87,12 @@ if __name__ == '__main__':
     hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
     hilo_auto.start()
     
-    # Hilo para que Telegram escuche los comandos en segundo plano
+    # Hilo separado para que Telegram escuche comandos de forma continua
     hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
     hilo_bot.start()
     
-    # Servidor web obligatorio para Render
+    print("Servidores e hilos iniciados correctamente...")
+    
+    # Flask se queda en el hilo principal manteniendo el puerto 10000 vivo para Render
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
