@@ -74,7 +74,7 @@ def background_auto_analyzer():
         time.sleep(900)
 
 def run_telegram_bot():
-    time.sleep(3) # Espera a que Flask estabilice el puerto
+    time.sleep(3)
     while True:
         try:
             print("Limpiando webhooks y arrancando polling de Telegram...")
@@ -85,7 +85,6 @@ def run_telegram_bot():
             time.sleep(5)
 
 if __name__ == '__main__':
-    # Lanzamos el bot de Telegram y el reporte en hilos daemon antes de iniciar Flask
     hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
     hilo_bot.start()
     
