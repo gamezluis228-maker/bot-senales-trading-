@@ -112,7 +112,6 @@ def escanear_radar():
             vol_prom = df['volume'].rolling(window=20).mean().iloc[-1]
             vol_act = df['volume'].iloc[-1]
             
-            # Criterio de radar: tendencia clara y buen volumen
             if ema5 > ema10 and ema10 > ema30 and vol_act > (vol_prom * 1.1):
                 oportunidades.append(f"🟢 **{symbol}**: Tendencia Alcista con Volumen (Precio: ${precio:,.2f})")
             elif ema5 < ema10 and ema10 < ema30 and vol_act > (vol_prom * 1.1):
@@ -126,30 +125,58 @@ def escanear_radar():
     except Exception as e:
         return f"❌ Error al ejecutar el radar: {str(e)}"
 
-def calcular_riesgo(margen_usdt=10, apalancamiento_dummy=10, sl_porcentaje=1):
+def calcular_riesgo(margen_usdt=10, symbol="BTC/USDT", sl_porcentaje=1):
     try:
         margen = float(margen_usdt)
         
-        if margen <= 15:
-            apalancamiento_sugerido = 20
-        elif margen <= 50:
-            apalancamiento_sugerido = 10
+        # Consultamos la volatilidad real del activo para ajustar el apalancamiento inteligentemente
+        exchange = ccxt.kucoinfutures()
+        target_symbol = f"{symbol}:USDT" if ":USDT" not in symbol else symbol
+        ohlcv = exchange.fetch_ohlcv(target_symbol, timeframe='15m', limit=30)
+        
+        if ohlcv and len(ohlcv) >= 14:
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            precio = df['close'].iloc[-1]
+            tr0 = abs(df['high'] - df['low'])
+            tr1 = abs(df['high'] - df['close'].shift())
+            tr2 = abs(df['low'] - df['close'].shift())
+            tr = pd.concat([tr0, tr1, tr2], axis=1).max(axis=1)
+            atr = tr.rolling(window=14).mean().iloc[-1]
+            volatility_pct = (atr / precio) * 100
         else:
-            apalancamiento_sugerido = 5
+            volatility_pct = 0.3
+
+        # Lógica adaptativa: Alta volatilidad reduce el apalancamiento recomendado
+        if volatility_pct > 0.5:
+            base_lev = 10
+        elif volatility_pct > 0.25:
+            base_lev = 15
+        else:
+            base_lev = 20
+
+        # Combinamos con el tamaño del margen
+        if margen <= 15:
+            apalancamiento_sugerido = min(base_lev + 5, 25)
+        elif margen <= 50:
+            apalancamiento_sugerido = base_lev
+        else:
+            apalancamiento_sugerido = max(base_lev // 2, 5)
 
         riesgo_usd = margen * (float(sl_porcentaje) / 100)
         posicion_total = margen * apalancamiento_sugerido
 
         return (
-            f"🧮 **GESTIÓN DE RIESGO INTELIGENTE**\n\n"
+            f"🧮 **GESTIÓN DE RIESGO INTELIGENTE (Adaptativa)**\n\n"
+            f"🪙 **Activo Analizado:** {symbol}\n"
             f"💵 **Margen Asignado:** ${margen:,.2f}\n"
+            f"📊 **Volatilidad del Mercado (ATR %):** {volatility_pct:.2f}%\n"
             f"⚡ **Apalancamiento Sugerido:** {apalancamiento_sugerido}x\n"
             f"🛡️ **Riesgo Máximo ({sl_porcentaje}%):** ${riesgo_usd:,.2f}\n"
             f"🎯 **Tamaño de Posición Total:** ${posicion_total:,.2f}\n"
-            f"💡 *Calculado automáticamente según tu margen para proteger tu capital.*"
+            f"💡 *Apalancamiento ajustado en tiempo real según la volatilidad y tu margen.*"
         )
-    except ValueError:
-        return "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 10`"
+    except Exception as e:
+        return f"⚠️ Error al calcular riesgo: {str(e)}. Usa el formato: `/riesgo 10`"
 
 analyze_market = analizar_mercado_symbol
 calculate_risk = calcular_riesgo
