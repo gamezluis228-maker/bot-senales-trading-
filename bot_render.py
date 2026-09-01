@@ -18,7 +18,6 @@ def home():
 
 @bot.message_handler(commands=['start', 'operar'])
 def handle_start(message):
-    # Creamos la cuadrícula de botones tal como la tenías
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
         InlineKeyboardButton("🪙 BTC/USDT", callback_data="analisis_BTC/USDT"),
@@ -74,7 +73,6 @@ def handle_radar(message):
     else:
         bot.reply_to(message, "📡 **RADAR DE MERCADO**: Las altcoins están en rango o sin suficiente volumen institucional en este momento.", parse_mode='Markdown')
 
-# Manejador para los toques en la cuadrícula de botones
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     try:
@@ -117,13 +115,14 @@ def run_telegram_bot():
     time.sleep(3)
     while True:
         try:
-            print("Limpiando webhooks y sesiones previas de Telegram...")
+            print("Iniciando conexión con Telegram...")
             bot.remove_webhook()
-            # skip_pending=True descarta peticiones viejas colgadas y evita el Error 409
-            bot.infinity_polling(timeout=20, long_polling_timeout=10, skip_pending=True)
+            # Bucle blindado con reconexión automática si Telegram bota la sesión
+            bot.infinity_polling(timeout=60, long_polling_timeout=30, skip_pending=True)
         except Exception as e:
-            print(f"Conflicto o desconexión detectada. Reintentando en 15 segundos... Detalles: {e}")
-            time.sleep(15)
+            print(f"⚠️ El bot de Telegram se desconectó: {e}")
+            print("Intentando reconectar en 5 segundos...")
+            time.sleep(5)
 
 if __name__ == '__main__':
     hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
@@ -132,6 +131,6 @@ if __name__ == '__main__':
     hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
     hilo_auto.start()
     
-    print("Hilos iniciados. Levantando servidor web Flask...")
+    print("Hilos de trading y Telegram iniciados. Levantando servidor web Flask...")
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
