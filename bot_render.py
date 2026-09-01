@@ -1,11 +1,19 @@
+import os
 import time
+import threading
 import telebot
+from flask import Flask
 from analisis import analyze_market, calculate_risk, radar_market
 
-TOKEN = "TU_TOKEN_DE_TELEGRAM"
-TU_CHAT_ID = "TU_CHAT_ID"
+TOKEN = "7983691656:AAHEfXF1W2x1W2x..."  # Mantén tu token real aquí
+TU_CHAT_ID = "tu_chat_id_real"           # Mantén tu chat ID real aquí
 
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot de Trading activo y operando 24/7 en la nube."
 
 @bot.message_handler(commands=['start'])
 def handle_start(message):
@@ -65,18 +73,24 @@ def background_auto_analyzer():
         
         time.sleep(900)
 
-if __name__ == '__main__':
-    import threading
-    hilo_auto = threading.Thread(target=background_auto_analyzer)
-    hilo_auto.daemon = True
-    hilo_auto.start()
-    
-    print("Bot iniciado correctamente y escuchando...")
-    
-    # Bucle blindado para reconectar automáticamente ante cualquier conflicto temporal de Telegram
+def run_telegram_bot():
     while True:
         try:
+            print("Iniciando polling de Telegram...")
             bot.infinity_polling(timeout=10, long_polling_timeout=5)
         except Exception as e:
             print(f"Reconectando por conflicto temporal: {e}")
             time.sleep(5)
+
+if __name__ == '__main__':
+    # Hilo para el reporte automático de BTC cada 15 minutos
+    hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
+    hilo_auto.start()
+    
+    # Hilo para que Telegram escuche los comandos en segundo plano
+    hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
+    hilo_bot.start()
+    
+    # Servidor web obligatorio para Render
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
