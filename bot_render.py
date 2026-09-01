@@ -70,7 +70,7 @@ def handle_radar(message):
 def callback_analizar(call):
     symbol = call.data.split("_")[1]
     bot.answer_callback_query(call.id, f"Analizando {symbol}...")
-    bot.send_message(call.message.chat.id, f"🔍 *Analizando EMAs (15m) y volumen para {symbol}...*", parse_mode='Markdown')
+    bot.send_message(call.message.chat.id, f"🔍 *Analizando doble temporalidad (1H y 15m) para {symbol}...*", parse_mode='Markdown')
     
     resultado = analyze_market(symbol)
     bot.send_message(call.message.chat.id, resultado, parse_mode='Markdown')
@@ -80,38 +80,38 @@ def handle_riesgo(message):
     try:
         partes = message.text.split()
         margen = partes[1] if len(partes) > 1 else 10
-        resultado = calculate_risk(margen_usdt=margen)
+        symbol = partes[2].upper() if len(partes) > 2 else "BTC/USDT"
+        if not symbol.endswith("/USDT"):
+            symbol += "/USDT"
+            
+        resultado = calculate_risk(margen_usdt=margen, symbol=symbol)
         bot.reply_to(message, resultado, parse_mode='Markdown')
     except Exception as e:
-        bot.reply_to(message, "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 10`", parse_mode='Markdown')
+        bot.reply_to(message, "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 10` o `/riesgo 10 ETH`", parse_mode='Markdown')
 
 # 3. Tarea en segundo plano: Alarma automática cada 15 minutos
 def background_auto_analyzer():
-    # Espera 30 segundos a que el bot inicie correctamente
     time.sleep(30)
     while True:
         try:
             bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (15M)**\n*Revisando cruce de EMAs y rupturas institucionales...*", parse_mode='Markdown')
-            # Análisis automático de BTC/USDT en el reporte de 15m
             resultado_btc = analyze_market("BTC/USDT")
             bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
         except Exception as e:
             print(f"Error en tarea automática: {e}")
         
-        # Duerme exactamente 15 minutos (900 segundos)
         time.sleep(900)
 
 # 4. Ejecución concurrente (Flask + Bot + Hilo de 15 minutos)
 if __name__ == '__main__':
-    # Hilo para Flask
     t_flask = threading.Thread(target=run_flask)
     t_flask.daemon = True
     t_flask.start()
 
-    # Hilo para el análisis automático de 15 minutos
     t_auto = threading.Thread(target=background_auto_analyzer)
     t_auto.daemon = True
     t_auto.start()
     
-    print("🤖 Bot privado iniciado y operando 24/7 con alertas de 15m...")
+    print("🤖 Bot privado iniciado y operando 24/7 con gestión de riesgo adaptativa...")
     bot.infinity_polling(skip_pending=True)
+
