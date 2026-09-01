@@ -1,37 +1,35 @@
-# ==========================================
-# 1. IMPORTACIONES (Va hasta arriba del todo)
-# ==========================================
+import os
 import telebot
-# (Tus otras importaciones de Flask, os, threading, etc...)
 from analisis import analyze_market, calculate_risk, radar_market
 
 # ==========================================
-# 2. INICIALIZACIÓN DEL BOT (Ya lo tienes en tu código)
+# 1. INICIALIZACIÓN DEL BOT
 # ==========================================
-TOKEN = "TU_TOKEN_DE_TELEGRAM" # (o como lo tengas configurado con os.environ)
+# Asegúrate de que tu Token esté configurado en las variables de entorno de Render
+TOKEN = os.environ.get("TELEGRAM_TOKEN", "TU_TOKEN_POR_DEFECTO")
 bot = telebot.TeleBot(TOKEN)
 
 # ==========================================
-# 3. TUS COMANDOS Y BOTONES (Van debajo de bot = telebot...)
+# 2. COMANDOS Y MANEJADORES
 # ==========================================
 
-# (Aquí seguro tienes tu comando /start o tus botones actuales...)
-# @bot.message_handler(commands=['start'])
-# def send_welcome(message):
-#     ...
+@bot.message_handler(commands=['start'])
+def send_welcome(message):
+    bot.reply_to(message, "🤖 Bot privado iniciado y operando 24/7...", parse_mode='Markdown')
 
-# ---> AQUÍ PEGAS EL NUEVO BLOQUE DEL RADAR <---
 @bot.message_handler(commands=['radar'])
 def handle_radar(message):
-    # Mensaje de espera para que sepas que está trabajando
+    # Mensaje de aviso de que está escaneando
     bot.reply_to(message, "📡 *Escaneando el mercado institucional...*", parse_mode='Markdown')
     
-    # Llama a la función y devuelve el resultado
+    # Ejecuta el análisis masivo desde analisis.py
     resultado_radar = radar_market()
     bot.reply_to(message, resultado_radar, parse_mode='Markdown')
 
-
 # ==========================================
-# 4. ARRANQUE DEL SERVIDOR / POLLING (El final de tu archivo)
+# 3. BLOQUE FINAL DE ARRANQUE
 # ==========================================
-# (Aquí va tu código de Flask o bot.polling() que ya tienes al final)
+if __name__ == '__main__':
+    print("🤖 Bot privado iniciado y operando 24/7...")
+    # skip_pending=True descarta cualquier sesión colgada anterior en Telegram
+    bot.infinity_polling(skip_pending=True)
