@@ -5,7 +5,8 @@ import telebot
 from flask import Flask
 from analisis import analyze_market, calculate_risk, radar_market
 
-TOKEN = "7983691656:AAHEfXF1W2x1W2x..."  # Reemplaza esto con tu token completo de BotFather sin dejar puntos suspensivos al final
+# Lee el token directamente de las variables de entorno de Render
+TOKEN = os.environ.get("TELEGRAM_TOKEN")  # Asegúrate de que la Key en Render se llame exactamente TELEGRAM_TOKEN (o cámbiala aquí si pusiste otro nombre)
 TU_CHAT_ID = "tu_chat_id_real"           # Tu chat ID real
 
 bot = telebot.TeleBot(TOKEN)
