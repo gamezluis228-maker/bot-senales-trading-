@@ -90,22 +90,32 @@ def analizar_mercado_symbol(symbol="BTC/USDT"):
     except Exception as e:
         return f"❌ Error al analizar {symbol}: {str(e)}"
 
-def calcular_riesgo(capital_usdt=50, apalancamiento=10, sl_porcentaje=1):
+def calcular_riesgo(margen_usdt=10, apalancamiento_dummy=10, sl_porcentaje=1):
     try:
-        capital = float(capital_usdt)
-        lev = float(apalancamiento) if apalancamiento else 10
-        riesgo_usd = capital * (float(sl_porcentaje) / 100)
-        posicion_total = capital * lev
+        margen = float(margen_usdt)
+        
+        # Lógica inteligente de apalancamiento sugerido según el margen ingresado
+        # Si vas con poco margen (ej. 10 o 20 USDT), el bot recomienda un apalancamiento óptimo (ej. 10x o 20x)
+        if margen <= 15:
+            apalancamiento_sugerido = 20
+        elif margen <= 50:
+            apalancamiento_sugerido = 10
+        else:
+            apalancamiento_sugerido = 5
+
+        riesgo_usd = margen * (float(sl_porcentaje) / 100)
+        posicion_total = margen * apalancamiento_sugerido
+
         return (
-            f"🧮 **GESTIÓN DE RIESGO (MICRO-FUTUROS)**\n\n"
-            f"💰 **Capital Asignado:** ${capital:,.2f}\n"
-            f"⚡ **Apalancamiento:** {int(lev)}x\n"
+            f"🧮 **GESTIÓN DE RIESGO INTELIGENTE**\n\n"
+            f"💵 **Margen Asignado:** ${margen:,.2f}\n"
+            f"⚡ **Apalancamiento Sugerido:** {apalancamiento_sugerido}x\n"
             f"🛡️ **Riesgo Máximo ({sl_porcentaje}%):** ${riesgo_usd:,.2f}\n"
             f"🎯 **Tamaño de Posición Total:** ${posicion_total:,.2f}\n"
-            f"💡 *Ideal para operar controlado y con cabeza fría.*"
+            f"💡 *Calculado automáticamente según tu margen para proteger tu capital.*"
         )
     except ValueError:
-        return "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 50 10` (Capital y Apalancamiento)"
+        return "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 10`"
 
 analyze_market = analizar_mercado_symbol
 calculate_risk = calcular_riesgo
