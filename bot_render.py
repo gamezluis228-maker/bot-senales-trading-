@@ -110,6 +110,7 @@ def background_auto_analyzer():
                 resultado_btc = analyze_market("BTC/USDT")
                 bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
         except Exception as e:
+            # Protegemos el hilo automático para que un fallo de red no apague el ciclo de los 15 min
             print(f"Error en tarea automática: {e}")
         time.sleep(900)
 
