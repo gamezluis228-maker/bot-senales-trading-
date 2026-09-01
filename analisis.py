@@ -90,12 +90,46 @@ def analizar_mercado_symbol(symbol="BTC/USDT"):
     except Exception as e:
         return f"❌ Error al analizar {symbol}: {str(e)}"
 
+def escanear_radar():
+    symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
+    oportunidades = []
+    
+    try:
+        exchange = ccxt.kucoinfutures()
+        for symbol in symbols:
+            target_symbol = f"{symbol}:USDT"
+            ohlcv_15m = exchange.fetch_ohlcv(target_symbol, timeframe='15m', limit=100)
+            if not ohlcv_15m or len(ohlcv_15m) < 50:
+                continue
+                
+            df = pd.DataFrame(ohlcv_15m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            precio = df['close'].iloc[-1]
+            
+            ema5 = df['close'].ewm(span=5, adjust=False).mean().iloc[-1]
+            ema10 = df['close'].ewm(span=10, adjust=False).mean().iloc[-1]
+            ema30 = df['close'].ewm(span=30, adjust=False).mean().iloc[-1]
+            
+            vol_prom = df['volume'].rolling(window=20).mean().iloc[-1]
+            vol_act = df['volume'].iloc[-1]
+            
+            # Criterio de radar: tendencia clara y buen volumen
+            if ema5 > ema10 and ema10 > ema30 and vol_act > (vol_prom * 1.1):
+                oportunidades.append(f"🟢 **{symbol}**: Tendencia Alcista con Volumen (Precio: ${precio:,.2f})")
+            elif ema5 < ema10 and ema10 < ema30 and vol_act > (vol_prom * 1.1):
+                oportunidades.append(f"🔴 **{symbol}**: Tendencia Bajista con Volumen (Precio: ${precio:,.2f})")
+                
+        if not oportunidades:
+            return "📡 **RADAR DE MERCADO**: Ninguna criptomoneda cumple con los filtros estrictos en este momento. Mercado en pausa o lateral."
+            
+        return "📡 **RADAR DE OPORTUNIDADES INSTITUCIONALES**:\n\n" + "\n".join(oportunidades)
+        
+    except Exception as e:
+        return f"❌ Error al ejecutar el radar: {str(e)}"
+
 def calcular_riesgo(margen_usdt=10, apalancamiento_dummy=10, sl_porcentaje=1):
     try:
         margen = float(margen_usdt)
         
-        # Lógica inteligente de apalancamiento sugerido según el margen ingresado
-        # Si vas con poco margen (ej. 10 o 20 USDT), el bot recomienda un apalancamiento óptimo (ej. 10x o 20x)
         if margen <= 15:
             apalancamiento_sugerido = 20
         elif margen <= 50:
@@ -119,3 +153,4 @@ def calcular_riesgo(margen_usdt=10, apalancamiento_dummy=10, sl_porcentaje=1):
 
 analyze_market = analizar_mercado_symbol
 calculate_risk = calcular_riesgo
+radar_market = escanear_radar
