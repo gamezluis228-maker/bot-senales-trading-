@@ -2,6 +2,7 @@ import os
 import time
 import datetime
 import threading
+import requests
 import telebot
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -9,6 +10,8 @@ from analisis import analyze_market, calculate_risk, radar_market
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TU_CHAT_ID = "7115547861"  # Chat ID configurado directamente
+# URL de tu aplicación en Render (la sacamos automáticamente del nombre de tu servicio o la puedes fijar)
+RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://bot-senales-trading-2.onrender.com")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -100,12 +103,21 @@ def callback_query(call):
     except Exception as e:
         print(f"Error en callback: {e}")
 
+# Hilo para evitar que Render duerma la instancia gratuita (Auto-Ping cada 8 minutos)
+def keep_alive():
+    while True:
+        try:
+            if RENDER_URL:
+                requests.get(RENDER_URL, timeout=10)
+                print("Ping enviado para mantener activo el servidor.")
+        except Exception as e:
+            print(f"Error en keep_alive: {e}")
+        time.sleep(480) # Cada 8 minutos
+
 def background_auto_analyzer():
-    # Pequeña pausa inicial al arrancar el bot
     time.sleep(10)
     while True:
         try:
-            # Sincronización matemática con el cierre exacto de la vela de 15 minutos
             now = datetime.datetime.now()
             current_minute = now.minute
             current_second = now.second
@@ -144,7 +156,10 @@ if __name__ == '__main__':
     
     hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
     hilo_auto.start()
+
+    hilo_ping = threading.Thread(target=keep_alive, daemon=True)
+    hilo_ping.start()
     
-    print("Hilos de trading y Telegram iniciados. Levantando servidor web Flask...")
+    print("Hilos de trading, Telegram y Keep-Alive iniciados. Levantando servidor web Flask...")
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
