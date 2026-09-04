@@ -3,7 +3,8 @@ import pandas as pd
 
 def analyze_market(symbol="BTC/USDT"):
     try:
-        exchange = ccxt.kucoinfutures({
+        # Configuración migrada a BingX Futuros
+        exchange = ccxt.bingx({
             'enableRateLimit': True,
             'timeout': 5000,
         })
@@ -13,21 +14,21 @@ def analyze_market(symbol="BTC/USDT"):
         ohlcv_1h = exchange.fetch_ohlcv(target_symbol, timeframe='1h', limit=24)
         
         if not ohlcv_15m or len(ohlcv_15m) < 50 or not ohlcv_1h:
-            return f"⚠️ No hay suficientes datos en Futuros de KuCoin para {symbol}."
+            return f"⚠️ No hay suficientes datos en Futuros de BingX para {symbol}."
 
         df_15m = pd.DataFrame(ohlcv_15m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         precio_actual = df_15m['close'].iloc[-1]
 
         df_1h = pd.DataFrame(ohlcv_1h, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         tendencia_1h = "ALCISTA 🟢" if df_1h['close'].iloc[-1] > df_1h['open'].iloc[-1] else "BAJISTA 🔴"
+        es_alcista_1h = df_1h['close'].iloc[-1] > df_1h['open'].iloc[-1]
 
-        df_15m['EMA_5'] = df_15m['close'].ewm(span=5, adjust=False).mean()
-        df_15m['EMA_10'] = df_15m['close'].ewm(span=10, adjust=False).mean()
-        df_15m['EMA_30'] = df_15m['close'].ewm(span=30, adjust=False).mean()
+        # Actualizado a EMA 9 y EMA 21 (15m)
+        df_15m['EMA_9'] = df_15m['close'].ewm(span=9, adjust=False).mean()
+        df_15m['EMA_21'] = df_15m['close'].ewm(span=21, adjust=False).mean()
         
-        ema5 = df_15m['EMA_5'].iloc[-1]
-        ema10 = df_15m['EMA_10'].iloc[-1]
-        ema30 = df_15m['EMA_30'].iloc[-1]
+        ema9 = df_15m['EMA_9'].iloc[-1]
+        ema21 = df_15m['EMA_21'].iloc[-1]
 
         resistencia = df_15m['high'].iloc[-20:].max()
         soporte = df_15m['low'].iloc[-20:].min()
@@ -51,23 +52,25 @@ def analyze_market(symbol="BTC/USDT"):
         sl_short = round(precio_actual + (atr * 1.5), 2)
         tp_short = round(precio_actual - (atr * 2.5), 2)
 
-        if ema5 > ema10 and ema10 > ema30 and precio_actual > resistencia * 0.995 and tiene_volumen:
+        # Lógica de decisión con filtro multi-temporalidad (1H + 15m con EMA 9/21)
+        if ema9 > ema21 and es_alcista_1h and precio_actual > resistencia * 0.995 and tiene_volumen:
             trend_filter = "ALCISTA (Ruptura con Volumen 🚀)"
-            accion = "🟢 COMPRA / LONG (¡Ruptura Validada!)"
+            accion = "🟢 COMPRA / LONG (¡Ruptura Validada con 1H!)"
             estrategia = f"• **Entrada (Long):** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl_long:,.2f}\n• **Take Profit (TP):** ${tp_long:,.2f}"
-        elif ema5 < ema10 and ema10 < ema30 and precio_actual < soporte * 1.005 and tiene_volumen:
+        elif ema9 < ema21 and not es_alcista_1h and precio_actual < soporte * 1.005 and tiene_volumen:
             trend_filter = "BAJISTA (Caída con Volumen 🩸)"
-            accion = "🔴 VENTA / SHORT (¡Ruptura Validada!)"
+            accion = "🔴 VENTA / SHORT (¡Ruptura Validada con 1H!)"
             estrategia = f"• **Entrada (Short):** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl_short:,.2f}\n• **Take Profit (TP):** ${tp_short:,.2f}"
-        elif ema5 > ema10:
-            trend_filter = "Impulso Alcista Moderado"
-            accion = "🟢 COMPRA / LONG (EMA 5 > 10)"
+        elif ema9 > ema21 and es_alcista_1h:
+            trend_filter = "Impulso Alcista Sólido (1H + 15m)"
+            accion = "🟢 COMPRA / LONG (EMA 9 > 21)"
             estrategia = f"• **Entrada (Long):** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl_long:,.2f}\n• **Take Profit (TP):** ${tp_long:,.2f}"
-        elif ema5 < ema10:
-            trend_filter = "Impulso Bajista Moderado"
-            accion = "🔴 VENTA / SHORT (EMA 5 < 10)"
+        elif ema9 < ema21 and not es_alcista_1h:
+            trend_filter = "Impulso Bajista Sólido (1H + 15m)"
+            accion = "🔴 VENTA / SHORT (EMA 9 < 21)"
             estrategia = f"• **Entrada (Short):** ${precio_actual:,.2f}\n• **Stop Loss (SL):** ${sl_short:,.2f}\n• **Take Profit (TP):** ${tp_short:,.2f}"
 
+        # Cálculo de RSI clásico (14)
         cierres = df_15m['close'].values
         cambios = [cierres[i] - cierres[i-1] for i in range(1, len(cierres))]
         ganancias = [c if c > 0 else 0 for c in cambios]
@@ -77,7 +80,7 @@ def analyze_market(symbol="BTC/USDT"):
         rsi = 100 if avg_perdida == 0 else 100 - (100 / (1 + (avg_ganancia / avg_perdida)))
 
         mensaje = (
-            f"⚡ **FUTUROS KUCOIN: {symbol}**\n\n"
+            f"⚡ **FUTUROS BINGX: {symbol}**\n\n"
             f"💵 **Precio Actual:** ${precio_actual:,.2f}\n"
             f"🌅 **Tendencia Macro (1H):** {tendencia_1h}\n"
             f"📊 **Estructura (15m):** {trend_filter}\n"
@@ -97,7 +100,7 @@ def radar_market():
     oportunidades = []
     
     try:
-        exchange = ccxt.kucoinfutures({
+        exchange = ccxt.bingx({
             'enableRateLimit': True,
             'timeout': 5000,
         })
@@ -111,16 +114,15 @@ def radar_market():
                 df = pd.DataFrame(ohlcv_15m, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
                 precio = df['close'].iloc[-1]
                 
-                ema5 = df['close'].ewm(span=5, adjust=False).mean().iloc[-1]
-                ema10 = df['close'].ewm(span=10, adjust=False).mean().iloc[-1]
-                ema30 = df['close'].ewm(span=30, adjust=False).mean().iloc[-1]
+                ema9 = df['close'].ewm(span=9, adjust=False).mean().iloc[-1]
+                ema21 = df['close'].ewm(span=21, adjust=False).mean().iloc[-1]
                 
                 vol_prom = df['volume'].rolling(window=15).mean().iloc[-1]
                 vol_act = df['volume'].iloc[-1]
                 
-                if ema5 > ema10 and ema10 > ema30 and vol_act > (vol_prom * 1.1):
+                if ema9 > ema21 and vol_act > (vol_prom * 1.1):
                     oportunidades.append(f"🟢 **{symbol}**: Alcista con Volumen (${precio:,.2f})")
-                elif ema5 < ema10 and ema10 < ema30 and vol_act > (vol_prom * 1.1):
+                elif ema9 < ema21 and vol_act > (vol_prom * 1.1):
                     oportunidades.append(f"🔴 **{symbol}**: Bajista con Volumen (${precio:,.2f})")
             except Exception:
                 continue
@@ -137,7 +139,7 @@ def calculate_risk(margen_usdt=10, symbol="BTC/USDT", sl_porcentaje=1):
     try:
         margen = float(margen_usdt)
         
-        exchange = ccxt.kucoinfutures({
+        exchange = ccxt.bingx({
             'enableRateLimit': True,
             'timeout': 5000,
         })
