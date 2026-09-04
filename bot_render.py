@@ -10,7 +10,6 @@ from analisis import analyze_market, calculate_risk, radar_market
 
 TOKEN = os.environ.get("TELEGRAM_TOKEN")
 TU_CHAT_ID = "7115547861"  # Chat ID configurado directamente
-# URL de tu aplicación en Render (la sacamos automáticamente del nombre de tu servicio o la puedes fijar)
 RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://bot-senales-trading-2.onrender.com")
 
 bot = telebot.TeleBot(TOKEN)
@@ -47,7 +46,7 @@ def handle_analisis(message):
         if not symbol.endswith("/USDT"):
             symbol += "/USDT"
             
-        bot.reply_to(message, f"🔍 Analizando {symbol} en KuCoin Futuros...", parse_mode='Markdown')
+        bot.reply_to(message, f"🔍 Analizando {symbol} en BingX Futuros...", parse_mode='Markdown')
         resultado = analyze_market(symbol)
         bot.reply_to(message, resultado, parse_mode='Markdown')
     except Exception as e:
@@ -83,7 +82,7 @@ def callback_query(call):
         if call.data.startswith("analisis_"):
             symbol = call.data.split("_")[1]
             bot.answer_callback_query(call.id, f"Analizando {symbol}...")
-            bot.send_message(call.message.chat.id, f"🔍 Analizando {symbol} en KuCoin Futuros...", parse_mode='Markdown')
+            bot.send_message(call.message.chat.id, f"🔍 Analizando {symbol} en BingX Futuros...", parse_mode='Markdown')
             resultado = analyze_market(symbol)
             bot.send_message(call.message.chat.id, resultado, parse_mode='Markdown')
             
@@ -131,7 +130,7 @@ def background_auto_analyzer():
             time.sleep(seconds_to_wait)
             
             if TU_CHAT_ID:
-                bot.send_message(TU_CHAT_ID, "⏰ **REPORTE AUTOMÁTICO (Cierre Vela 15M)**\n*Analizando pulso de Bitcoin al cierre de vela...*", parse_mode='Markdown')
+                # REPORTE ÚNICO: Envía directamente el análisis sin duplicar mensajes
                 resultado_btc = analyze_market("BTC/USDT")
                 bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
         except Exception as e:
