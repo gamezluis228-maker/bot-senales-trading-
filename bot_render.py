@@ -114,28 +114,27 @@ def keep_alive():
         time.sleep(480) # Cada 8 minutos
 
 def background_auto_analyzer():
-    time.sleep(10)
+    ultimo_bloque_enviado = ""
     while True:
         try:
             now = datetime.datetime.now()
-            current_minute = now.minute
-            current_second = now.second
+            # Creamos una etiqueta única para el bloque actual de 15 minutos (ej: "2026-09-03-22-15")
+            minuto_bloque = (now.minute // 15) * 15
+            bloque_actual = f"{now.strftime('%Y-%m-%d-%H')}-{minuto_bloque:02d}"
+
+            # Si estamos en los primeros 2 minutos del cierre de vela y aún no se ha enviado en este bloque
+            if now.minute % 15 == 0 and now.second < 120 and ultimo_bloque_enviado != bloque_actual:
+                if TU_CHAT_ID:
+                    resultado_btc = analyze_market("BTC/USDT")
+                    bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
+                    ultimo_bloque_enviado = bloque_actual
+                    print(f"✅ Reporte automático enviado exitosamente para el bloque {bloque_actual}")
             
-            remainder = 15 - (current_minute % 15)
-            seconds_to_wait = (remainder * 60) - current_second
-            if seconds_to_wait <= 0:
-                seconds_to_wait += 900
-                
-            print(f"⏰ Esperando {seconds_to_wait} segundos para sincronizar con el cierre de la vela de 15m...")
-            time.sleep(seconds_to_wait)
-            
-            if TU_CHAT_ID:
-                # REPORTE ÚNICO: Envía directamente el análisis sin duplicar mensajes
-                resultado_btc = analyze_market("BTC/USDT")
-                bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
+            # Verificamos cada 20 segundos para no saturar CPU pero mantener precisión
+            time.sleep(20)
         except Exception as e:
             print(f"Error en tarea automática: {e}")
-            time.sleep(60)
+            time.sleep(30)
 
 def run_telegram_bot():
     time.sleep(3)
@@ -162,3 +161,4 @@ if __name__ == '__main__':
     print("Hilos de trading, Telegram y Keep-Alive iniciados. Levantando servidor web Flask...")
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+    
