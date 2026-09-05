@@ -96,7 +96,12 @@ def analyze_market(symbol="BTC/USDT"):
         return f"❌ Error al analizar {symbol}: {str(e)}"
 
 def radar_market():
-    symbols = ["BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT"]
+    # Lista ampliada con las 15 criptomonedas más volátiles y de mayor volumen en BingX Futuros
+    symbols = [
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ZEC/USDT",
+        "NEAR/USDT", "APT/USDT", "SUI/USDT", "DOGE/USDT", "AVAX/USDT",
+        "RENDER/USDT", "PEPE/USDT", "LINK/USDT", "FET/USDT", "INJ/USDT"
+    ]
     oportunidades = []
     
     try:
@@ -187,3 +192,4 @@ def calculate_risk(margen_usdt=10, symbol="BTC/USDT", sl_porcentaje=1):
         )
     except Exception as e:
         return f"⚠️ Error al calcular riesgo: {str(e)}. Usa el formato: `/riesgo 10`"
+            
