@@ -3,12 +3,10 @@ import telebot
 from telebot import types
 import ccxt
 
-# Cargar credenciales de entorno configuradas en Render
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 bingx_api_key = os.getenv('BINGX_API_KEY')
 bingx_secret_key = os.getenv('BINGX_SECRET_KEY')
 
-# Inicializar el bot de Telegram y BingX
 bot = telebot.TeleBot(TOKEN)
 
 exchange = ccxt.bingx({
@@ -38,7 +36,6 @@ def handle_callback_query(call):
         bot.send_message(call.message.chat.id, f"Detalle del error: {str(e)}")
 
 if __name__ == "__main__":
-    # Limpia webhooks y descarta actualizaciones pendientes para evitar el Error 409
     bot.remove_webhook()
     bot.infinity_polling(none_stop=True, skip_pending=True)
     
