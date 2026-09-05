@@ -1,177 +1,95 @@
 import os
-import time
-import datetime
-import threading
-import requests
 import telebot
-from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
-from analisis import analyze_market, calculate_risk, radar_market
+from analisis import analyze_market, radar_market, calculate_risk
 
-TOKEN = os.environ.get("TELEGRAM_TOKEN")
-TU_CHAT_ID = "7115547861"  # Chat ID configurado directamente
-RENDER_URL = os.environ.get("RENDER_EXTERNAL_URL", "https://bot-senales-trading-2.onrender.com")
+TOKEN = os.getenv("TELEGRAM_TOKEN")
+if not TOKEN:
+    raise ValueError("⚠️ No se encontró el TELEGRAM_TOKEN en las variables de entorno.")
 
 bot = telebot.TeleBot(TOKEN)
-app = Flask(__name__)
 
-@app.route('/')
-def home():
-    return "Bot de Trading activo y operando 24/7 en la nube."
+# 15 Activos del radar
+SYMBOLS = [
+    "BTC/USDT", "ETH/USDT", "SOL/USDT", "XRP/USDT", "ZEC/USDT",
+    "NEAR/USDT", "APT/USDT", "SUI/USDT", "DOGE/USDT", "AVAX/USDT",
+    "RENDER/USDT", "PEPE/USDT", "LINK/USDT", "FET/USDT", "INJ/USDT"
+]
 
-@bot.message_handler(commands=['start', 'operar'])
-def handle_start(message):
+def get_main_keyboard():
     markup = InlineKeyboardMarkup(row_width=2)
-    markup.add(
-        InlineKeyboardButton("🪙 BTC/USDT", callback_data="analisis_BTC/USDT"),
-        InlineKeyboardButton("🪙 ETH/USDT", callback_data="analisis_ETH/USDT"),
-        InlineKeyboardButton("🪙 SOL/USDT", callback_data="analisis_SOL/USDT"),
-        InlineKeyboardButton("🪙 XRP/USDT", callback_data="analisis_XRP/USDT"),
-        InlineKeyboardButton("🪙 ZEC/USDT", callback_data="analisis_ZEC/USDT"),
-        InlineKeyboardButton("📡 Radar Mercado", callback_data="cmd_radar"),
-        InlineKeyboardButton("⚠️ Riesgo 10U", callback_data="cmd_riesgo")
-    )
+    for i in range(0, len(SYMBOLS), 2):
+        row = [InlineKeyboardButton(SYMBOLS[i], callback_data=f"analyze_{SYMBOLS[i]}")]
+        if i + 1 < len(SYMBOLS):
+            row.append(InlineKeyboardButton(SYMBOLS[i+1], callback_data=f"analyze_{SYMBOLS[i+1]}"))
+        markup.row(*row)
+    markup.row(InlineKeyboardButton("📡 Radar Mercado (15 Activos)", callback_data="radar_all"))
+    return markup
+
+def get_margin_keyboard(symbol):
+    """Crea la cuadrícula de botones de 1 a 20 USDT para seleccionar margen."""
+    markup = InlineKeyboardMarkup(row_width=5)
+    # Filas de 1 a 20 USDT organizadas en 5 columnas
+    row1 = [InlineKeyboardButton(f"{i}$", callback_data=f"margin_{i}_{symbol}") for i in range(1, 6)]
+    row2 = [InlineKeyboardButton(f"{i}$", callback_data=f"margin_{i}_{symbol}") for i in range(6, 11)]
+    row3 = [InlineKeyboardButton(f"{i}$", callback_data=f"margin_{i}_{symbol}") for i in range(11, 16)]
+    row4 = [InlineKeyboardButton(f"{i}$", callback_data=f"margin_{i}_{symbol}") for i in range(16, 21)]
     
-    bot.reply_to(
-        message, 
-        "🤖 **Selecciona la criptomoneda o función a analizar:**", 
-        reply_markup=markup, 
-        parse_mode='Markdown'
+    markup.row(*row1)
+    markup.row(*row2)
+    markup.row(*row3)
+    markup.row(*row4)
+    markup.row(InlineKeyboardButton("⚡ Confirmar y Ejecutar en BingX", callback_data=f"exec_{symbol}"))
+    return markup
+
+@bot.message_handler(commands=['start', 'help'])
+def send_welcome(message):
+    texto = (
+        "🤖 **BÓT PROFESIONAL DE SEÑALES Y RIESGO**\n\n"
+        "Selecciona abajo la criptomoneda que deseas analizar en vivo o lanza el radar global para barrer el mercado con el filtro ADX:"
     )
-
-@bot.message_handler(commands=['analisis'])
-def handle_analisis(message):
-    try:
-        partes = message.text.split()
-        symbol = partes[1].upper() if len(partes) > 1 else "BTC/USDT"
-        if not symbol.endswith("/USDT"):
-            symbol += "/USDT"
-            
-        bot.reply_to(message, f"🔍 Analizando {symbol} en BingX Futuros...", parse_mode='Markdown')
-        resultado = analyze_market(symbol)
-        bot.reply_to(message, resultado, parse_mode='Markdown')
-    except Exception as e:
-        bot.reply_to(message, "⚠️ Uso correcto: `/analisis ETH/USDT`", parse_mode='Markdown')
-
-@bot.message_handler(commands=['riesgo'])
-def handle_riesgo(message):
-    try:
-        partes = message.text.split()
-        margen = partes[1] if len(partes) > 1 else "10"
-        symbol = partes[2].upper() if len(partes) > 2 else "BTC/USDT"
-        if not symbol.endswith("/USDT"):
-            symbol += "/USDT"
-            
-        resultado = calculate_risk(margen_usdt=margen, symbol=symbol)
-        bot.reply_to(message, resultado, parse_mode='Markdown')
-    except Exception as e:
-        bot.reply_to(message, "⚠️ Usa el formato correcto, por ejemplo: `/riesgo 10`", parse_mode='Markdown')
-
-@bot.message_handler(commands=['radar'])
-def handle_radar(message):
-    bot.reply_to(message, "📡 *Escaneando el mercado institucional...*", parse_mode='Markdown')
-    resultado_radar = radar_market()
-    
-    if resultado_radar:
-        bot.reply_to(message, resultado_radar, parse_mode='Markdown')
-    else:
-        bot.reply_to(message, "📡 **RADAR DE MERCADO**: Las altcoins están en rango o sin suficiente volumen institucional en este momento.", parse_mode='Markdown')
+    bot.send_message(message.chat.id, texto, reply_markup=get_main_keyboard(), parse_mode="Markdown")
 
 @bot.callback_query_handler(func=lambda call: True)
-def callback_query(call):
-    try:
-        if call.data.startswith("analisis_"):
-            symbol = call.data.split("_")[1]
-            bot.answer_callback_query(call.id, f"Analizando {symbol}...")
-            bot.send_message(call.message.chat.id, f"🔍 Analizando {symbol} en BingX Futuros...", parse_mode='Markdown')
-            resultado = analyze_market(symbol)
-            bot.send_message(call.message.chat.id, resultado, parse_mode='Markdown')
+def callback_handler(call):
+    data = call.data
+    chat_id = call.message.chat.id
+    
+    if data == "radar_all":
+        bot.answer_callback_query(call.id, "Escaneando las 15 criptomonedas...")
+        bot.send_message(chat_id, "📡 Escaneando el mercado institucional con filtro ADX...")
+        resultado_radar = radar_market()
+        if resultado_radar:
+            bot.send_message(chat_id, resultado_radar, parse_mode="Markdown")
+        else:
+            bot.send_message(chat_id, "📡 **RADAR:** Las altcoins están en rango actualmente o sin suficiente volumen. Pausa defensiva activa.", parse_mode="Markdown")
             
-        elif call.data == "cmd_radar":
-            bot.answer_callback_query(call.id, "Escaneando mercado...")
-            bot.send_message(call.message.chat.id, "📡 *Escaneando el mercado institucional...*", parse_mode='Markdown')
-            resultado_radar = radar_market()
-            if resultado_radar:
-                bot.send_message(call.message.chat.id, resultado_radar, parse_mode='Markdown')
-            else:
-                bot.send_message(call.message.chat.id, "📡 **RADAR**: Las altcoins están en rango actualmente.", parse_mode='Markdown')
-                
-        elif call.data == "cmd_riesgo":
-            bot.answer_callback_query(call.id, "Calculando riesgo...")
-            resultado = calculate_risk(margen_usdt=10, symbol="BTC/USDT")
-            bot.send_message(call.message.chat.id, resultado, parse_mode='Markdown')
-    except Exception as e:
-        print(f"Error en callback: {e}")
+    elif data.startswith("analyze_"):
+        symbol = data.replace("analyze_", "")
+        bot.answer_callback_query(call.id, f"Analizando {symbol}...")
+        
+        # Primero enviamos el análisis técnico con sus niveles y riesgo base
+        analisis_msg = analyze_market(symbol)
+        bot.send_message(chat_id, analisis_msg, parse_mode="Markdown")
+        
+        selector_msg = f"⚙️ Selecciona el margen en USDT que deseas destinar para operar **{symbol}**:"
+        bot.send_message(chat_id, selector_msg, reply_markup=get_margin_keyboard(symbol), parse_mode="Markdown")
+        
+    elif data.startswith("margin_"):
+        parts = data.split("_")
+        monto = parts[1]
+        symbol = f"{parts[2]}/{parts[3]}"
+        
+        bot.answer_callback_query(call.id, f"Margen seleccionado: {monto} USDT")
+        # Calculamos el riesgo adaptativo en base al monto elegido por el usuario
+        calculo_riesgo = calculate_risk(margen_usdt=monto, symbol=symbol, sl_porcentaje=1)
+        bot.send_message(chat_id, f"✅ **Configuración actualizada para {symbol}**\n\n{calculo_riesgo}", parse_mode="Markdown")
+        
+    elif data.startswith("exec_"):
+        symbol = data.replace("exec_", "")
+        bot.answer_callback_query(call.id, "Preparando orden en BingX...")
+        bot.send_message(chat_id, f"🚀 *[SIMULACIÓN/CONEXIÓN]* Enviando orden de ejecución para **{symbol}** a BingX bajo los parámetros aprobados.", parse_mode="Markdown")
 
-# Hilo para evitar que Render duerma la instancia gratuita (Auto-Ping cada 8 minutos)
-def keep_alive():
-    while True:
-        try:
-            if RENDER_URL:
-                requests.get(RENDER_URL, timeout=10)
-                print("Ping enviado para mantener activo el servidor.")
-        except Exception as e:
-            print(f"Error en keep_alive: {e}")
-        time.sleep(480) # Cada 8 minutos
-
-def background_auto_analyzer():
-    archivo_control = "last_sent_block.txt"
-    while True:
-        try:
-            now = datetime.datetime.now()
-            minuto_bloque = (now.minute // 15) * 15
-            bloque_actual = f"{now.strftime('%Y-%m-%d-%H')}-{minuto_bloque:02d}"
-
-            ultimo_bloque_enviado = ""
-            if os.path.exists(archivo_control):
-                with open(archivo_control, "r") as f:
-                    ultimo_bloque_enviado = f.read().strip()
-
-            if now.minute % 15 == 0 and now.second < 120 and ultimo_bloque_enviado != bloque_actual:
-                if TU_CHAT_ID:
-                    # 1. Reporte de BTC/USDT
-                    resultado_btc = analyze_market("BTC/USDT")
-                    bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
-                    
-                    time.sleep(1.5)
-                    
-                    # 2. Reporte de ZEC/USDT
-                    resultado_zec = analyze_market("ZEC/USDT")
-                    bot.send_message(TU_CHAT_ID, resultado_zec, parse_mode='Markdown')
-                    
-                    with open(archivo_control, "w") as f:
-                        f.write(bloque_actual)
-                        
-                    print(f"✅ Reportes automáticos (BTC y ZEC) enviados y bloqueados para el periodo {bloque_actual}")
-            
-            time.sleep(15)
-        except Exception as e:
-            print(f"Error en tarea automática: {e}")
-            time.sleep(30)
-
-def run_telegram_bot():
-    time.sleep(3)
-    while True:
-        try:
-            print("Iniciando conexión con Telegram...")
-            bot.remove_webhook()
-            bot.infinity_polling(timeout=60, long_polling_timeout=30, skip_pending=True)
-        except Exception as e:
-            print(f"⚠️ El bot de Telegram se desconectó: {e}")
-            print("Intentando reconectar en 5 segundos...")
-            time.sleep(5)
-
-if __name__ == '__main__':
-    hilo_bot = threading.Thread(target=run_telegram_bot, daemon=True)
-    hilo_bot.start()
-    
-    hilo_auto = threading.Thread(target=background_auto_analyzer, daemon=True)
-    hilo_auto.start()
-
-    hilo_ping = threading.Thread(target=keep_alive, daemon=True)
-    hilo_ping.start()
-    
-    print("Hilos de trading, Telegram y Keep-Alive iniciados. Levantando servidor web Flask...")
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
-    
+if __name__ == "__main__":
+    print("🤖 Bot de Telegram iniciado correctamente con botones de margen y radar.")
+    bot.infinity_polling()
