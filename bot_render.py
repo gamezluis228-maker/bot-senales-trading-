@@ -27,7 +27,7 @@ def handle_start(message):
         InlineKeyboardButton("🪙 ETH/USDT", callback_data="analisis_ETH/USDT"),
         InlineKeyboardButton("🪙 SOL/USDT", callback_data="analisis_SOL/USDT"),
         InlineKeyboardButton("🪙 XRP/USDT", callback_data="analisis_XRP/USDT"),
-        InlineKeyboardButton("🪙 ZEC/USDT", callback_data="analisis_ZEC/USDT"), # <-- Botón añadido para ZEC
+        InlineKeyboardButton("🪙 ZEC/USDT", callback_data="analisis_ZEC/USDT"),
         InlineKeyboardButton("📡 Radar Mercado", callback_data="cmd_radar"),
         InlineKeyboardButton("⚠️ Riesgo 10U", callback_data="cmd_riesgo")
     )
@@ -115,31 +115,36 @@ def keep_alive():
         time.sleep(480) # Cada 8 minutos
 
 def background_auto_analyzer():
-    ultimo_bloque_enviado = ""
+    archivo_control = "last_sent_block.txt"
     while True:
         try:
             now = datetime.datetime.now()
             minuto_bloque = (now.minute // 15) * 15
             bloque_actual = f"{now.strftime('%Y-%m-%d-%H')}-{minuto_bloque:02d}"
 
-            # Envío automático al cierre de cada vela de 15 minutos (Exactamente 2 mensajes: BTC y ZEC)
+            ultimo_bloque_enviado = ""
+            if os.path.exists(archivo_control):
+                with open(archivo_control, "r") as f:
+                    ultimo_bloque_enviado = f.read().strip()
+
             if now.minute % 15 == 0 and now.second < 120 and ultimo_bloque_enviado != bloque_actual:
                 if TU_CHAT_ID:
                     # 1. Reporte de BTC/USDT
                     resultado_btc = analyze_market("BTC/USDT")
                     bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
                     
-                    # Pequeña pausa para asegurar orden y evitar saturación en Telegram
-                    time.sleep(1)
+                    time.sleep(1.5)
                     
                     # 2. Reporte de ZEC/USDT
                     resultado_zec = analyze_market("ZEC/USDT")
                     bot.send_message(TU_CHAT_ID, resultado_zec, parse_mode='Markdown')
                     
-                    ultimo_bloque_enviado = bloque_actual
-                    print(f"✅ Reportes automáticos (BTC y ZEC) enviados exitosamente para el bloque {bloque_actual}")
+                    with open(archivo_control, "w") as f:
+                        f.write(bloque_actual)
+                        
+                    print(f"✅ Reportes automáticos (BTC y ZEC) enviados y bloqueados para el periodo {bloque_actual}")
             
-            time.sleep(20)
+            time.sleep(15)
         except Exception as e:
             print(f"Error en tarea automática: {e}")
             time.sleep(30)
@@ -169,3 +174,4 @@ if __name__ == '__main__':
     print("Hilos de trading, Telegram y Keep-Alive iniciados. Levantando servidor web Flask...")
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
+    
