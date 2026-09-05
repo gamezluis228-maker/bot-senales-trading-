@@ -27,6 +27,7 @@ def handle_start(message):
         InlineKeyboardButton("🪙 ETH/USDT", callback_data="analisis_ETH/USDT"),
         InlineKeyboardButton("🪙 SOL/USDT", callback_data="analisis_SOL/USDT"),
         InlineKeyboardButton("🪙 XRP/USDT", callback_data="analisis_XRP/USDT"),
+        InlineKeyboardButton("🪙 ZEC/USDT", callback_data="analisis_ZEC/USDT"), # <-- Botón añadido para ZEC
         InlineKeyboardButton("📡 Radar Mercado", callback_data="cmd_radar"),
         InlineKeyboardButton("⚠️ Riesgo 10U", callback_data="cmd_riesgo")
     )
@@ -118,19 +119,26 @@ def background_auto_analyzer():
     while True:
         try:
             now = datetime.datetime.now()
-            # Creamos una etiqueta única para el bloque actual de 15 minutos (ej: "2026-09-03-22-15")
             minuto_bloque = (now.minute // 15) * 15
             bloque_actual = f"{now.strftime('%Y-%m-%d-%H')}-{minuto_bloque:02d}"
 
-            # Si estamos en los primeros 2 minutos del cierre de vela y aún no se ha enviado en este bloque
+            # Envío automático al cierre de cada vela de 15 minutos (Exactamente 2 mensajes: BTC y ZEC)
             if now.minute % 15 == 0 and now.second < 120 and ultimo_bloque_enviado != bloque_actual:
                 if TU_CHAT_ID:
+                    # 1. Reporte de BTC/USDT
                     resultado_btc = analyze_market("BTC/USDT")
                     bot.send_message(TU_CHAT_ID, resultado_btc, parse_mode='Markdown')
+                    
+                    # Pequeña pausa para asegurar orden y evitar saturación en Telegram
+                    time.sleep(1)
+                    
+                    # 2. Reporte de ZEC/USDT
+                    resultado_zec = analyze_market("ZEC/USDT")
+                    bot.send_message(TU_CHAT_ID, resultado_zec, parse_mode='Markdown')
+                    
                     ultimo_bloque_enviado = bloque_actual
-                    print(f"✅ Reporte automático enviado exitosamente para el bloque {bloque_actual}")
+                    print(f"✅ Reportes automáticos (BTC y ZEC) enviados exitosamente para el bloque {bloque_actual}")
             
-            # Verificamos cada 20 segundos para no saturar CPU pero mantener precisión
             time.sleep(20)
         except Exception as e:
             print(f"Error en tarea automática: {e}")
@@ -161,4 +169,3 @@ if __name__ == '__main__':
     print("Hilos de trading, Telegram y Keep-Alive iniciados. Levantando servidor web Flask...")
     port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
-    
