@@ -37,5 +37,5 @@ def handle_callback_query(call):
 
 if __name__ == "__main__":
     bot.remove_webhook()
-    bot.infinity_polling(none_stop=True, skip_pending=True)
+    bot.infinity_polling(timeout=60, long_polling_timeout=60)
     
