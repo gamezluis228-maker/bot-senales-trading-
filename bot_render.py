@@ -44,7 +44,7 @@ def send_welcome(message):
         reply_markup=markup
     )
 
-# Comando rápido para verificar el balance y la conexión con BingX
+# Comando para verificar el balance y la conexión con BingX
 @bot.message_handler(commands=['balance'])
 def check_balance(message):
     try:
@@ -71,9 +71,8 @@ def handle_callback_query(call):
             raise Exception("El exchange no está inicializado correctamente (revisa las API keys).")
         
         chat_id = call.message.chat.id
-        monto_elegido = user_margins.get(chat_id, "1") # Por defecto 1 si no seleccionó nada
+        monto_elegido = user_margins.get(chat_id, "1")
         
-        # Consulta rápida al exchange para verificar la respuesta en vivo
         balance = exchange.fetch_balance()
         usdt_free = balance['USDT']['free'] if 'USDT' in balance else 0
         
@@ -91,3 +90,4 @@ def handle_callback_query(call):
 if __name__ == "__main__":
     bot.remove_webhook()
     bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    
