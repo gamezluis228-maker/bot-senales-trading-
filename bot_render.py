@@ -28,6 +28,13 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'swap'}
 })
 
+# CARGAR MERCADOS OBLIGATORIO PARA CCXT
+try:
+    exchange.load_markets()
+    print("¡Mercados de BingX cargados correctamente!")
+except Exception as e:
+    print(f"Error al cargar mercados de BingX: {e}")
+
 @app.route('/')
 def home():
     return "Bot Activo - Multitemporal 1H y 15M"
@@ -119,19 +126,19 @@ def obtener_analisis_tecnico(symbol):
             "pausa": pausa_bot
         }
     except Exception as e:
-        print(f"Error en obtener_analisis_tecnico para {symbol}: {e}")
+        print(f"Error detallado en obtener_analisis_tecnico para {symbol}: {e}")
         return {
-            "precio": 1000.0,
-            "tendencia_1h": "NEUTRAL",
-            "adx_1h": 14.0,
-            "rsi_1h": 50.0,
-            "tendencia_15m": "NEUTRAL",
-            "adx_15m": 14.0,
-            "rsi_15m": 50.0,
-            "resistencia": 1050.0,
-            "soporte": 950.0,
-            "estado": "MERCADO LATERAL",
-            "pausa": "Error al consultar temporalidades."
+            "precio": 0.0,
+            "tendencia_1h": "ERROR",
+            "adx_1h": 0.0,
+            "rsi_1h": 0.0,
+            "tendencia_15m": "ERROR",
+            "adx_15m": 0.0,
+            "rsi_15m": 0.0,
+            "resistencia": 0.0,
+            "soporte": 0.0,
+            "estado": "FALLA EN EXCHANGE",
+            "pausa": str(e)
         }
 
 # --- 1. MENÚ PRINCIPAL ---
@@ -281,35 +288,37 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
-# --- 4. HILO DE ALERTAS CADA 15 MIN ---
+# --- 4. HILO DE ALERTAS CADA 15 MIN (ANTIDUPLICADOS) ---
 def bucle_alertas_15m():
     global ultimo_timestamp_btc, ultimo_timestamp_zec
     while True:
         try:
             for coin in ["BTC", "ZEC"]:
                 market_symbol = f"{coin}/USDT:USDT"
-                ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=5)
+                ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
                 if ohlcv_15m and len(ohlcv_15m) >= 2:
+                    # Usamos la penúltima vela (la que acaba de cerrar oficialmente)
                     candle_cerrada_time = ohlcv_15m[-2][0]
                     
-                    if coin == "BTC" and candle_cerrada_time != ultimo_timestamp_btc:
-                        print(f"¡Disparando alerta 15m para BTC!")
+                    if coin == "BTC" and candle_cerrada_time > ultimo_timestamp_btc:
                         ultimo_timestamp_btc = candle_cerrada_time
+                        print(f"Disparando reporte único 15m para BTC...")
                         enviar_reporte_automatico(coin)
-                    elif coin == "ZEC" and candle_cerrada_time != ultimo_timestamp_zec:
-                        print(f"¡Disparando alerta 15m para ZEC!")
+                    elif coin == "ZEC" and candle_cerrada_time > ultimo_timestamp_zec:
                         ultimo_timestamp_zec = candle_cerrada_time
+                        print(f"Disparando reporte único 15m para ZEC...")
                         enviar_reporte_automatico(coin)
         except Exception as e:
             print(f"Error crítico en bucle_alertas_15m: {e}")
         
-        time.sleep(30)
+        # Pausa de 60 segundos para evitar saturación de consultas
+        time.sleep(60)
 
 def enviar_reporte_automatico(coin):
     try:
         analisis = obtener_analisis_tecnico(coin)
         reporte = (
-            f"🔔 **REPORTE AUTOMÁTICO 15M / 1H** 🔔\n"
+            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
             f"⚡ Activo: {coin}/USDT\n\n"
             f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
             f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
@@ -319,9 +328,10 @@ def enviar_reporte_automatico(coin):
             f"⏳ Estado: {analisis['estado']}\n"
             f"• {analisis['pausa']}"
         )
-        bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+        if ULTIMO_CHAT_ID:
+            bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
-        print(f"No se pudo enviar la alerta de {coin}: {e}")
+        print(f"No se pudo enviar la alerta automática de {coin}: {e}")
 
 # --- 5. ARRANQUE ---
 def arrancar_bot_telegram():
