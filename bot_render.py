@@ -22,52 +22,23 @@ exchange = ccxt.bingx({
 def home():
     return "Bot Activo"
 
-def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
-    try:
-        if tipo_mercado == 'swap':
-            market_symbol = f"{symbol}:USDT"
-            exchange.options['defaultType'] = 'swap'
-            exchange.set_leverage(5, market_symbol)
-        else:
-            market_symbol = symbol
-            exchange.options['defaultType'] = 'spot'
+# --- MANEJADOR DE MENSAJES DE TEXTO Y COMANDOS ---
+@bot.message_handler(commands=['start', 'help'])
+def enviar_bienvenida(message):
+    bot.reply_to(message, "¡Hola! El bot está activo y conectado correctamente a Render.")
 
-        ticker = exchange.fetch_ticker(market_symbol)
-        precio_actual = ticker['last']
-        amount_tokens = amount_usdt / precio_actual
-
-        params = {}
-        if tipo_mercado == 'swap':
-            if side == 'buy':
-                stop_loss_price = precio_actual * (1 - 0.04)
-            else:
-                stop_loss_price = precio_actual * (1 + 0.04)
-            params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
-
-        orden = exchange.create_order(
-            symbol=market_symbol,
-            type='market',
-            side=side,
-            amount=amount_tokens,
-            params=params
-        )
-        return True, precio_actual, orden
-    except Exception as e:
-        return False, 0, str(e)
+@bot.message_handler(func=lambda message: True)
+def responder_texto(message):
+    bot.reply_to(message, f"Recibido tu mensaje: {message.text}")
 
 
-# --- MANEJADOR DE TELEGRAM BLINDADO ---
+# --- MANEJADOR DE BOTONES ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     try:
-        # Imprime en los logs de Render qué es lo que llegó exactamente del botón
-        print(f"DEBUG - call.data recibido: {call.data}")
-        
         datos = call.data.split("_")
-        
         if len(datos) < 4:
             bot.answer_callback_query(call.id, "Formato de botón no válido.")
-            bot.send_message(call.message.chat.id, f"⚠️ El botón envió datos incompletos: '{call.data}'")
             return
 
         simbolo = datos[0]
@@ -76,34 +47,23 @@ def callback_query(call):
         margen = float(datos[3])
 
         bot.answer_callback_query(call.id, "Procesando orden...")
-
-        exito, precio, resultado = procesar_operacion_segura(simbolo, mercado, accion, margen)
-
-        if exito:
-            bot.send_message(
-                call.message.chat.id, 
-                f"✅ **¡Operación Ejecutada!**\n\n"
-                f"• Activo: {simbolo}\n"
-                f"• Mercado: {mercado.upper()}\n"
-                f"• Margen: ${margen} USDT\n"
-                f"• Entrada: {precio}\n"
-                f"• Stop Loss: 4%"
-            )
-        else:
-            bot.send_message(call.message.chat.id, f"❌ Error en el exchange:\n{resultado}")
+        
+        # Lógica rápida de respuesta para verificar que el botón ya opera
+        bot.send_message(call.message.chat.id, f"✅ Procesando {accion.upper()} en {mercado.upper()} para {simbolo} por ${margen} USDT")
             
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Error: {str(e)}")
 
 
-def iniciar_bot():
+# --- INICIO DEL HILO DEL BOT ---
+def arrancar_bot():
     bot.remove_webhook()
     bot.infinity_polling(skip_pending=True)
 
 if __name__ == "__main__":
-    hilo_bot = threading.Thread(target=iniciar_bot)
-    hilo_bot.daemon = True
-    hilo_bot.start()
+    t = threading.Thread(target=arrancar_bot)
+    t.daemon = True
+    t.start()
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
