@@ -5,15 +5,16 @@ import ccxt
 from flask import Flask
 import threading
 import logging
+import time
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
-bingx_api_key = os.getenv('BINGX_API_KEY')
-bingx_secret_key = os.getenv('BINGX_SECRET_KEY')
 
-# Inicializar bot de Telegram
-bot = telebot.TeleBot(TOKEN, parse_mode=None)
+# Mapeo seguro de credenciales de BingX (soporta mayúsculas y minúsculas)
+bingx_api_key = os.getenv('BINGX_API_KEY') or os.getenv('bingx_api_key')
+bingx_secret_key = os.getenv('BINGX_SECRET_KEY') or os.getenv('bingx_secret_key')
 
-# Inicializar conexión con BingX
+bot = telebot.TeleBot(TOKEN)
+
 exchange = ccxt.bingx({
     'apiKey': bingx_api_key,
     'secret': bingx_secret_key,
@@ -23,7 +24,6 @@ exchange = ccxt.bingx({
     }
 })
 
-# Servidor Flask para mantener el servicio "Live" en Render
 app = Flask('')
 
 log = logging.getLogger('werkzeug')
@@ -55,6 +55,9 @@ def send_welcome(message):
 
 @bot.message_handler(commands=['balance'])
 def consultar_balance(message):
+    if not bingx_api_key or not bingx_secret_key:
+        bot.reply_to(message, "⚠️ Error: Las credenciales de BingX no están configuradas en las variables de entorno de Render.")
+        return
     try:
         balance = exchange.fetch_balance()
         bot.reply_to(message, "💼 ¡Conexión con BingX exitosa! El balance se ha consultado correctamente.")
@@ -125,22 +128,18 @@ def manejar_acciones(call):
             bot.send_message(call.message.chat.id, f"Detalle del error: {str(e)}")
 
 if __name__ == "__main__":
-    # Arrancar Flask en segundo plano para Render
     t = threading.Thread(target=run_flask)
     t.daemon = True
     t.start()
 
-    # Limpiar cualquier conexión vieja de webhook o polling colgado en Telegram
+    # Forzar la desconexión limpia de cualquier webhook previo
     try:
         bot.remove_webhook()
+        time.sleep(1)
     except Exception:
         pass
 
-    print("Iniciando bot de Telegram de forma limpia...")
-    # Ciclo de polling con manejo de errores para evitar caídas
-    while True:
-        try:
-            bot.infinity_polling(timeout=60, long_polling_timeout=30)
-        except Exception as e:
-            print(f"Error en polling: {e}")
+    print("Iniciando bot con polling continuo...")
+    # Usar infinity_polling directo con manejo de saltos pendientes para evitar bloqueos 409
+    bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
     
