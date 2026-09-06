@@ -14,7 +14,7 @@ SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ID de Telegram configurado de forma fija
+# ID de Telegram configurado de forma fija para asegurar los reportes
 ULTIMO_CHAT_ID = 7115547861
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
@@ -28,7 +28,7 @@ exchange = ccxt.bingx({
 
 @app.route('/')
 def home():
-    return "Bot Activo con ID Fijo y Doble Temporalidad (1H y 15m)"
+    return "Bot Activo - Multitemporal 1H y 15M"
 
 # --- FUNCIONES DE CÁLCULO TÉCNICO REAL ---
 def calcular_rsi(closes, period=14):
@@ -137,6 +137,7 @@ def obtener_analisis_tecnico(symbol):
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
+    print(f"Comando /start recibido de el chat ID: {message.chat.id}")
 
     markup = InlineKeyboardMarkup(row_width=3)
     monedas = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "MATIC", "UNI", "LTC", "ATOM", "ZEC"]
@@ -291,7 +292,6 @@ def bucle_alertas_15m():
                 ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=5)
                 if ohlcv_15m and len(ohlcv_15m) >= 2:
                     candle_cerrada_time = ohlcv_15m[-2][0]
-                    print(f"[{coin}] Timestamp vela cerrada: {candle_cerrada_time} | Anterior: BTC={ultimo_timestamp_btc}, ZEC={ultimo_timestamp_zec}")
                     
                     if coin == "BTC" and candle_cerrada_time != ultimo_timestamp_btc:
                         print(f"¡Disparando alerta 15m para BTC!")
