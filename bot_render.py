@@ -80,4 +80,3 @@ attr_callback(call):
         )
     else:
         bot.send_message(call.message.chat.id, f"❌ Error al ejecutar la orden: {resultado}")
-        
