@@ -16,7 +16,7 @@ SECRET_KEY = "9szXjstK16f4HCp0Wd1TxuCtEJVRtwPmyndSFAs0mOKY8b84Qf5OjSmCM6sgNngef5
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ID de Telegram configurado de forma fija
+# ID de Telegram configurado de forma fija con tu ID real
 ULTIMO_CHAT_ID = 7115547861
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
@@ -297,7 +297,6 @@ def bucle_alertas_15m():
                 market_symbol = f"{coin}/USDT:USDT"
                 ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
                 if ohlcv_15m and len(ohlcv_15m) >= 2:
-                    # Usamos la penúltima vela (la que acaba de cerrar oficialmente)
                     candle_cerrada_time = ohlcv_15m[-2][0]
                     
                     if coin == "BTC" and candle_cerrada_time > ultimo_timestamp_btc:
@@ -311,7 +310,6 @@ def bucle_alertas_15m():
         except Exception as e:
             print(f"Error crítico en bucle_alertas_15m: {e}")
         
-        # Pausa de 60 segundos para evitar saturación de consultas
         time.sleep(60)
 
 def enviar_reporte_automatico(coin):
