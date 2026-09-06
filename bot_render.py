@@ -34,6 +34,14 @@ def send_welcome(message):
     
     bot.reply_to(message, "CRYPTO ANÁLISIS MERCADOS 🟢\n\n🤖 Selecciona la criptomoneda o función a analizar:", reply_markup=markup)
 
+@bot.message_handler(commands=['balance'])
+def consultar_balance(message):
+    try:
+        balance = exchange.fetch_balance()
+        bot.reply_to(message, "💼 ¡Conexión con BingX exitosa! El balance se ha consultado correctamente.")
+    except Exception as e:
+        bot.reply_to(message, f"⚠️ Error consultando el balance en BingX: {str(e)}")
+
 @bot.callback_query_handler(func=lambda call: call.data == 'menu_margen')
 def mostrar_menu_margen(call):
     markup = types.InlineKeyboardMarkup(row_width=5)
@@ -103,6 +111,5 @@ if __name__ == "__main__":
         bot.remove_webhook()
     except Exception:
         pass
-    # Forzamos la limpieza del hilo de conexiones anteriores para evitar el error 409
     bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
     
