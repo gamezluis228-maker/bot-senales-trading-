@@ -18,12 +18,11 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'swap'}
 })
 
-# Ruta web obligatoria para que Render mantenga el servicio activo
 @app.route('/')
 def home():
-    return "Bot de Trading Activo y Operando"
+    return "Bot Activo"
 
-# --- FUNCIÓN DE EJECUCIÓN (Spot y Futuros con Stop Loss del 4%) ---
+# --- FUNCIÓN DE EJECUCIÓN SEGURA (Stop Loss 4% y Spot/Swap) ---
 def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
     try:
         if tipo_mercado == 'swap':
@@ -36,7 +35,6 @@ def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
 
         ticker = exchange.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
-
         amount_tokens = amount_usdt / precio_actual
 
         params = {}
@@ -45,7 +43,6 @@ def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
                 stop_loss_price = precio_actual * (1 - 0.04)
             else:
                 stop_loss_price = precio_actual * (1 + 0.04)
-            
             params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
 
         orden = exchange.create_order(
@@ -55,21 +52,26 @@ def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
             amount=amount_tokens,
             params=params
         )
-        
         return True, precio_actual, orden
     except Exception as e:
         return False, 0, str(e)
 
 
-# --- MANEJADOR DE TELEGRAM ---
+# --- MANEJADOR DE TELEGRAM BLINDADO CONTRA ERRORES DE LISTA ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     try:
         datos = call.data.split("_")
+        
+        # Validar que el botón tenga el formato correcto de 4 partes (ej: APT_swap_buy_10)
+        if len(datos) < 4:
+            bot.answer_callback_query(call.id, "Acción no reconocida o formato antiguo.")
+            return
+
         simbolo = datos[0]
-        mercado = datos[1]
-        accion = datos[2]
-        margen = float(datos[3])
+        mercado = datos[1]  # 'swap' o 'spot'
+        accion = datos[2]   # 'buy' o 'sell'
+        margen = float(datos[3])  # Entre 1 y 20 USDT
 
         bot.answer_callback_query(call.id, "Procesando orden...")
 
@@ -92,18 +94,15 @@ def callback_query(call):
         bot.send_message(call.message.chat.id, f"❌ Error: {str(e)}")
 
 
-# --- ARRANQUE DUAL (Flask + Bot en segundo plano) ---
+# --- ARRANQUE EN SEGUNDO PLANO ---
 def iniciar_bot():
     bot.remove_webhook()
     bot.infinity_polling(skip_pending=True)
 
 if __name__ == "__main__":
-    # Arranca el bot de Telegram en un hilo independiente
     hilo_bot = threading.Thread(target=iniciar_bot)
     hilo_bot.daemon = True
     hilo_bot.start()
 
-    # Arranca el servidor web que exige Render
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    
