@@ -119,7 +119,7 @@ def obtener_analisis_tecnico(symbol):
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
-    ULTIMO_CHAT_ID = message.chat.id  # Guardamos tu chat para las alertas automáticas
+    ULTIMO_CHAT_ID = message.chat.id
 
     markup = InlineKeyboardMarkup(row_width=3)
     monedas = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "MATIC", "UNI", "LTC", "ATOM", "ZEC"]
@@ -130,7 +130,7 @@ def mostrar_menu_principal(message):
 
     bot.send_message(
         message.chat.id, 
-        "CRYPTO ANÁLISIS MERCADOS 🟢\n\n🤖 Selecciona una criptomoneda para su análisis técnico:\n*(Las alertas automáticas de 15m para BTC y ZEC están activas)*", 
+        "CRYPTO ANÁLISIS MERCADOS 🟢\n\n🤖 Selecciona una criptomoneda para su análisis técnico:\n*(Alertas automáticas de 15m para BTC y ZEC activas)*", 
         reply_markup=markup
     )
 
@@ -259,7 +259,7 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
-# --- 4. HILO EN SEGUNDO PLANO PARA ALERTAS AUTOMÁTICAS CADA 15 MIN ---
+# --- 4. HILO DE ALERTAS CADA 15 MIN ---
 def bucle_alertas_15m():
     global ULTIMO_CHAT_ID, ultimo_timestamp_btc, ultimo_timestamp_zec
     while True:
@@ -269,9 +269,8 @@ def bucle_alertas_15m():
                     market_symbol = f"{coin}/USDT:USDT"
                     ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
                     if ohlcv_15m:
-                        current_candle_time = ohlcv_15m[-1][0]  # Timestamp de la vela actual de 15m
+                        current_candle_time = ohlcv_15m[-1][0]
                         
-                        # Si detectamos que hay una nueva vela de 15 minutos abierta/cerrada
                         if coin == "BTC" and current_candle_time != ultimo_timestamp_btc:
                             ultimo_timestamp_btc = current_candle_time
                             enviar_reporte_automatico(coin)
@@ -279,9 +278,9 @@ def bucle_alertas_15m():
                             ultimo_timestamp_zec = current_candle_time
                             enviar_reporte_automatico(coin)
         except Exception as e:
-            print(f"Error en bucle de alertas 15m: {e}")
+                            print(f"Error en bucle de alertas 15m: {e}")
         
-        time.sleep(30)  # Revisa cada 30 segundos el estado de la vela
+        time.sleep(30)
 
 def enviar_reporte_automatico(coin):
     try:
@@ -301,9 +300,9 @@ def enviar_reporte_automatico(coin):
         )
         bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
-        print(f"No se pudo enviar la alerta automática de {coin}: {e}")
+        print(f"No se pudo enviar la alerta de {coin}: {e}")
 
-# --- 5. ARRANQUE EN SEGUNDO PLANO (WEB Y BOT) ---
+# --- 5. ARRANQUE ---
 def arrancar_bot_telegram():
     try:
         bot.remove_webhook()
@@ -312,12 +311,10 @@ def arrancar_bot_telegram():
         print(f"Error en polling: {e}")
 
 if __name__ == "__main__":
-    # Hilo para el bot de Telegram
     hilo_bot = threading.Thread(target=arrancar_bot_telegram)
     hilo_bot.daemon = True
     hilo_bot.start()
 
-    # Hilo para las alertas automáticas de 15 minutos (BTC y ZEC)
     hilo_alertas = threading.Thread(target=bucle_alertas_15m)
     hilo_alertas.daemon = True
     hilo_alertas.start()
