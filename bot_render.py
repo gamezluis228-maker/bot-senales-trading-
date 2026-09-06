@@ -39,19 +39,22 @@ def mostrar_menu_principal(message):
         reply_markup=markup
     )
 
-# --- 2. MOTOR DE EJECUCIÓN SEGURA EN BINGX ---
+# --- 2. MOTOR DE EJECUCIÓN BLINDADO PARA HEDGE MODE EN BINGX ---
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
         if mercado == 'swap':
             market_symbol = f"{symbol}/USDT:USDT"
             exchange.options['defaultType'] = 'swap'
+            
+            position_side = 'LONG' if side == 'buy' else 'SHORT'
             try:
-                exchange.set_leverage(5, market_symbol, {'marginCoin': 'USDT'})
+                exchange.set_leverage(5, market_symbol, {'side': position_side, 'marginCoin': 'USDT'})
             except:
                 pass
         else:
             market_symbol = f"{symbol}/USDT"
             exchange.options['defaultType'] = 'spot'
+            position_side = None
 
         ticker = exchange.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
@@ -63,7 +66,9 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
                 stop_loss_price = precio_actual * (1 - 0.04)
             else:
                 stop_loss_price = precio_actual * (1 + 0.04)
+            
             params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
+            params['positionSide'] = position_side
 
         orden = exchange.create_order(
             symbol=market_symbol,
@@ -76,7 +81,7 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     except Exception as e:
         return False, 0, str(e)
 
-# --- 3. MANEJADOR DE BOTONES (CALLBACKS) BLINDADO ---
+# --- 3. MANEJADOR DE CALLBACKS ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     try:
@@ -86,7 +91,7 @@ def callback_query(call):
 
         accion = datos[0]
 
-        # --- CASO A: MOSTRAR ANÁLISIS TÉCNICO DETALLADO + OPCIONES DE MARGEN ---
+        # --- MOSTRAR ANÁLISIS + BOTONES DE MÁRGENES CLAVE ($5, $8, $10, $15, $20) ---
         if accion == "analisis" and len(datos) >= 2:
             coin = datos[1]
             market_symbol = f"{coin}/USDT:USDT"
@@ -99,7 +104,6 @@ def callback_query(call):
             except:
                 precio = 1000.0
 
-            # Estructura técnica detallada original
             reporte = (
                 f"⚡ **FUTUROS BINGX: {coin}/USDT**\n\n"
                 f"💵 Precio Actual: ${precio:,.2f}\n"
@@ -114,23 +118,26 @@ def callback_query(call):
                 f"• ADX: 13.9 (Sin fuerza tendencial)\n"
                 f"• Soporte: ${precio * 0.99:,.2f} |\n"
                 f"Resistencia: ${precio * 1.01:,.2f}\n\n"
-                f"⚙️ **Elige el margen ($1 a $20) para operar {coin}:**"
+                f"⚙️ **Selecciona el margen y tipo de operación para {coin}:**"
             )
 
-            # Botones de selección de operación y margen flexible
+            # Botones organizados limpiamente con los márgenes solicitados ($5, $8, $10, $15, $20)
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
-                InlineKeyboardButton(f"🚀 Compra Futuros ($5)", callback_data=f"trade_{coin}_swap_buy_5"),
-                InlineKeyboardButton(f"🚀 Compra Futuros ($10)", callback_data=f"trade_{coin}_swap_buy_10"),
-                InlineKeyboardButton(f"📉 Venta Futuros ($5)", callback_data=f"trade_{coin}_swap_sell_5"),
-                InlineKeyboardButton(f"📉 Venta Futuros ($10)", callback_data=f"trade_{coin}_swap_sell_10"),
-                InlineKeyboardButton(f"🟢 Compra Spot ($5)", callback_data=f"trade_{coin}_spot_buy_5"),
-                InlineKeyboardButton(f"🟢 Compra Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10")
+                InlineKeyboardButton("🚀 Comprar Long ($5)", callback_data=f"trade_{coin}_swap_buy_5"),
+                InlineKeyboardButton("🚀 Comprar Long ($10)", callback_data=f"trade_{coin}_swap_buy_10"),
+                InlineKeyboardButton("📉 Vender Short ($5)", callback_data=f"trade_{coin}_swap_sell_5"),
+                InlineKeyboardButton("📉 Vender Short ($10)", callback_data=f"trade_{coin}_swap_sell_10"),
+                InlineKeyboardButton("🚀 Comprar Long ($15)", callback_data=f"trade_{coin}_swap_buy_15"),
+                InlineKeyboardButton("🚀 Comprar Long ($20)", callback_data=f"trade_{coin}_swap_buy_20"),
+                InlineKeyboardButton("📉 Vender Short ($15)", callback_data=f"trade_{coin}_swap_sell_15"),
+                InlineKeyboardButton("📉 Vender Short ($20)", callback_data=f"trade_{coin}_swap_sell_20"),
+                InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10"),
+                InlineKeyboardButton("🟢 Spot ($20)", callback_data=f"trade_{coin}_spot_buy_20")
             )
 
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
 
-        # --- CASO B: EJECUTAR OPERACIÓN CON EL MARGEN SELECCIONADO ---
         elif accion == "trade" and len(datos) >= 5:
             coin = datos[1]
             mercado = datos[2]
@@ -153,7 +160,6 @@ def callback_query(call):
             else:
                 bot.send_message(call.message.chat.id, f"❌ Error en BingX:\n{resultado}")
 
-        # --- CASO C: RADAR DE MERCADO ---
         elif call.data == "radar_mercado":
             bot.answer_callback_query(call.id, "Radar activo")
             bot.send_message(call.message.chat.id, "📡 **Radar de Mercado:** Filtro anti-rangos laterales activo.")
@@ -161,7 +167,7 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
-# --- 4. ARRANQUE EN SEGUNDO PLANO (FLASK + TELEGRAM BOT) ---
+# --- 4. ARRANQUE EN SEGUNDO PLANO ---
 def arrancar_bot_telegram():
     try:
         bot.remove_webhook()
@@ -176,4 +182,3 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-    
