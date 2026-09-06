@@ -321,16 +321,18 @@ def enviar_reporte_automatico(coin):
         )
         bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
-    def verify_step_success():
         print(f"No se pudo enviar la alerta de {coin}: {e}")
 
 # --- 5. ARRANQUE ---
 def arrancar_bot_telegram():
-    try:
-        bot.remove_webhook()
-        bot.infinity_polling(skip_pending=True)
-    except Exception as e:
-        print(f"Error in polling: {e}")
+    while True:
+        try:
+            bot.remove_webhook()
+            print("Iniciando polling de Telegram...")
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"Error crítico en polling de Telegram: {e}")
+            time.sleep(10)
 
 if __name__ == "__main__":
     hilo_bot = threading.Thread(target=arrancar_bot_telegram)
@@ -343,4 +345,3 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-  
