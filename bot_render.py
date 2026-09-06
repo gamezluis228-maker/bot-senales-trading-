@@ -108,14 +108,9 @@ def manejar_acciones(call):
 
 if __name__ == "__main__":
     try:
-        bot.stop_polling()
-    except Exception:
-        pass
-    
-    try:
         bot.remove_webhook()
     except Exception:
         pass
         
-    bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+    bot.infinity_polling(skip_pending=True)
     
