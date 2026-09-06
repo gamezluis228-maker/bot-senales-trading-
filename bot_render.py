@@ -14,7 +14,6 @@ SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Variable global para recordar tu chat ID y mandarte las alertas automáticas ahí
 ULTIMO_CHAT_ID = None
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
@@ -28,7 +27,7 @@ exchange = ccxt.bingx({
 
 @app.route('/')
 def home():
-    return "Bot de Trading y Análisis Activo con Alertas 15m"
+    return "Bot de Trading y Análisis Activo con TP/SL Activos"
 
 # --- FUNCIONES DE CÁLCULO TÉCNICO REAL ---
 def calcular_rsi(closes, period=14):
@@ -134,7 +133,7 @@ def mostrar_menu_principal(message):
         reply_markup=markup
     )
 
-# --- 2. MOTOR DE EJECUCIÓN BLINDADO PARA HEDGE MODE EN BINGX ---
+# --- 2. MOTOR DE EJECUCIÓN CON TP (8%) Y SL (4%) EN BINGX ---
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
         if not API_KEY or not SECRET_KEY:
@@ -161,11 +160,14 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
         params = {}
         if mercado == 'swap':
             if side == 'buy':
-                stop_loss_price = precio_actual * (1 - 0.04)
+                stop_loss_price = precio_actual * (1 - 0.04)     # -4% de Riesgo
+                take_profit_price = precio_actual * (1 + 0.08)   # +8% de Beneficio (1:2)
             else:
-                stop_loss_price = precio_actual * (1 + 0.04)
+                stop_loss_price = precio_actual * (1 + 0.04)     # +4% de Riesgo
+                take_profit_price = precio_actual * (1 - 0.08)   # -8% de Beneficio (1:2)
             
             params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
+            params['takeProfitPrice'] = exchange.price_to_precision(market_symbol, take_profit_price)
             params['positionSide'] = position_side
 
         orden = exchange.create_order(
@@ -247,7 +249,8 @@ def callback_query(call):
                     f"• Mercado: {mercado.upper()}\n"
                     f"• Margen: ${margen} USDT\n"
                     f"• Entrada: ${precio:,.2f}\n"
-                    f"• Stop Loss: 4% 🛡️"
+                    f"• Take Profit: +8% 🎯\n"
+                    f"• Stop Loss: -4% 🛡️"
                 )
             else:
                 bot.send_message(call.message.chat.id, f"❌ Error en BingX:\n{resultado}")
@@ -278,7 +281,7 @@ def bucle_alertas_15m():
                             ultimo_timestamp_zec = current_candle_time
                             enviar_reporte_automatico(coin)
         except Exception as e:
-                            print(f"Error en bucle de alertas 15m: {e}")
+            print(f"Error en bucle de alertas 15m: {e}")
         
         time.sleep(30)
 
@@ -308,7 +311,7 @@ def arrancar_bot_telegram():
         bot.remove_webhook()
         bot.infinity_polling(skip_pending=True)
     except Exception as e:
-        print(f"Error en polling: {e}")
+        print(f"Error in polling: {e}")
 
 if __name__ == "__main__":
     hilo_bot = threading.Thread(target=arrancar_bot_telegram)
