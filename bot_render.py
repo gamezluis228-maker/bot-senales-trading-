@@ -1,5 +1,6 @@
 import os
 import threading
+import time
 import telebot
 import ccxt
 import numpy as np
@@ -13,7 +14,11 @@ SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# Inicialización segura de CCXT BingX
+# Variable global para recordar tu chat ID y mandarte las alertas automáticas ahí
+ULTIMO_CHAT_ID = None
+ultimo_timestamp_btc = 0
+ultimo_timestamp_zec = 0
+
 exchange = ccxt.bingx({
     'apiKey': API_KEY if API_KEY else '',
     'secret': SECRET_KEY if SECRET_KEY else '',
@@ -23,7 +28,7 @@ exchange = ccxt.bingx({
 
 @app.route('/')
 def home():
-    return "Bot de Trading y Análisis Activo"
+    return "Bot de Trading y Análisis Activo con Alertas 15m"
 
 # --- FUNCIONES DE CÁLCULO TÉCNICO REAL ---
 def calcular_rsi(closes, period=14):
@@ -110,9 +115,12 @@ def obtener_analisis_tecnico(symbol):
             "pausa": "Bot en pausa defensiva por rango lateral."
         }
 
-# --- 1. MENÚ PRINCIPAL: CUADRÍCULA ORIGINAL DE MONEDAS (3x5) ---
+# --- 1. MENÚ PRINCIPAL Y REGISTRO DE CHAT ---
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id  # Guardamos tu chat para las alertas automáticas
+
     markup = InlineKeyboardMarkup(row_width=3)
     monedas = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "MATIC", "UNI", "LTC", "ATOM", "ZEC"]
     
@@ -122,7 +130,7 @@ def mostrar_menu_principal(message):
 
     bot.send_message(
         message.chat.id, 
-        "CRYPTO ANÁLISIS MERCADOS 🟢\n\n🤖 Selecciona una criptomoneda para su análisis técnico:", 
+        "CRYPTO ANÁLISIS MERCADOS 🟢\n\n🤖 Selecciona una criptomoneda para su análisis técnico:\n*(Las alertas automáticas de 15m para BTC y ZEC están activas)*", 
         reply_markup=markup
     )
 
@@ -174,6 +182,9 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
 # --- 3. MANEJADOR DE CALLBACKS ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = call.message.chat.id
+
     try:
         datos = call.data.split("_")
         if not datos:
@@ -248,7 +259,51 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
-# --- 4. ARRANQUE EN SEGUNDO PLANO ---
+# --- 4. HILO EN SEGUNDO PLANO PARA ALERTAS AUTOMÁTICAS CADA 15 MIN ---
+def bucle_alertas_15m():
+    global ULTIMO_CHAT_ID, ultimo_timestamp_btc, ultimo_timestamp_zec
+    while True:
+        try:
+            if ULTIMO_CHAT_ID:
+                for coin in ["BTC", "ZEC"]:
+                    market_symbol = f"{coin}/USDT:USDT"
+                    ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
+                    if ohlcv_15m:
+                        current_candle_time = ohlcv_15m[-1][0]  # Timestamp de la vela actual de 15m
+                        
+                        # Si detectamos que hay una nueva vela de 15 minutos abierta/cerrada
+                        if coin == "BTC" and current_candle_time != ultimo_timestamp_btc:
+                            ultimo_timestamp_btc = current_candle_time
+                            enviar_reporte_automatico(coin)
+                        elif coin == "ZEC" and current_candle_time != ultimo_timestamp_zec:
+                            ultimo_timestamp_zec = current_candle_time
+                            enviar_reporte_automatico(coin)
+        except Exception as e:
+            print(f"Error en bucle de alertas 15m: {e}")
+        
+        time.sleep(30)  # Revisa cada 30 segundos el estado de la vela
+
+def enviar_reporte_automatico(coin):
+    try:
+        if not ULTIMO_CHAT_ID:
+            return
+        analisis = obtener_analisis_tecnico(coin)
+        reporte = (
+            f"🔔 **REPORTE AUTOMÁTICO 15M** 🔔\n"
+            f"⚡ Activo: {coin}/USDT\n\n"
+            f"💵 Precio Actual: ${analisis['precio']:,.2f}\n"
+            f"🌅 Tendencia Macro (1H): {analisis['tendencia']}\n"
+            f"📊 Fuerza Tendencia (ADX): {analisis['adx']} | RSI: {analisis['rsi']}\n\n"
+            f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
+            f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
+            f"⏳ Estado: {analisis['estado']}\n"
+            f"• {analisis['pausa']}"
+        )
+        bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+    except Exception as e:
+        print(f"No se pudo enviar la alerta automática de {coin}: {e}")
+
+# --- 5. ARRANQUE EN SEGUNDO PLANO (WEB Y BOT) ---
 def arrancar_bot_telegram():
     try:
         bot.remove_webhook()
@@ -257,9 +312,15 @@ def arrancar_bot_telegram():
         print(f"Error en polling: {e}")
 
 if __name__ == "__main__":
+    # Hilo para el bot de Telegram
     hilo_bot = threading.Thread(target=arrancar_bot_telegram)
     hilo_bot.daemon = True
     hilo_bot.start()
+
+    # Hilo para las alertas automáticas de 15 minutos (BTC y ZEC)
+    hilo_alertas = threading.Thread(target=bucle_alertas_15m)
+    hilo_alertas.daemon = True
+    hilo_alertas.start()
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
