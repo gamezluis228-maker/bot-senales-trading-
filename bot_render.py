@@ -7,20 +7,20 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# --- LECTURA CORRECTA DE TUS VARIABLES DE ENTORNO DE RENDER ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-
-# --- TUS CREDENCIALES DE BINGX INTEGRADAS ---
-API_KEY = "2qLQDoat8RrAZWuwiY5O9jFeRNvT3hEQLA0wTP7O0kR1XQe7mcRkPDlkOUFSmFvKtVUKA3aWEgd2OkLm0g"
-SECRET_KEY = "9szXjstK16f4HCp0Wd1TxuCtEJVRtwPmyndSFAs0mOKY8b84Qf5OjSmCM6sgNngef5DiFEV3nlWmBpfg"
+API_KEY = os.getenv("BINGX_API_KEY")
+SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ID de Telegram configurado de forma fija con tu ID real
+# ID de Telegram configurado fijo
 ULTIMO_CHAT_ID = 7115547861
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
 
+# CONFIGURACIÓN DE CCXT CON TUS VARIABLES DE RENDER
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
@@ -28,7 +28,6 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'swap'}
 })
 
-# CARGAR MERCADOS OBLIGATORIO PARA CCXT
 try:
     exchange.load_markets()
     print("¡Mercados de BingX cargados correctamente!")
@@ -39,7 +38,6 @@ except Exception as e:
 def home():
     return "Bot Activo - Multitemporal 1H y 15M"
 
-# --- FUNCIONES DE CÁLCULO TÉCNICO REAL ---
 def calcular_rsi(closes, period=14):
     if len(closes) < period + 1:
         return 50.0
@@ -82,7 +80,6 @@ def obtener_analisis_tecnico(symbol):
     try:
         market_symbol = f"{symbol}/USDT:USDT"
         
-        # 1. Macro 1H
         ohlcv_1h = exchange.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
         closes_1h = [x[4] for x in ohlcv_1h]
         highs_1h = [x[2] for x in ohlcv_1h]
@@ -95,7 +92,6 @@ def obtener_analisis_tecnico(symbol):
         soporte_1h = min(lows_1h[-10:])
         tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
 
-        # 2. Corto Plazo 15M
         ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
         closes_15m = [x[4] for x in ohlcv_15m]
         highs_15m = [x[2] for x in ohlcv_15m]
@@ -141,12 +137,10 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# --- 1. MENÚ PRINCIPAL ---
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
-    print(f"Comando /start recibido de el chat ID: {message.chat.id}")
 
     markup = InlineKeyboardMarkup(row_width=3)
     monedas = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "MATIC", "UNI", "LTC", "ATOM", "ZEC"]
@@ -161,7 +155,6 @@ def mostrar_menu_principal(message):
         reply_markup=markup
     )
 
-# --- 2. MOTOR DE EJECUCIÓN CON TP (8%) Y SL (4%) EN BINGX ---
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
         if mercado == 'swap':
@@ -206,7 +199,6 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     except Exception as e:
         return False, 0, str(e)
 
-# --- 3. MANEJADOR DE CALLBACKS ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     global ULTIMO_CHAT_ID
@@ -288,7 +280,6 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
-# --- 4. HILO DE ALERTAS CADA 15 MIN (ANTIDUPLICADOS) ---
 def bucle_alertas_15m():
     global ultimo_timestamp_btc, ultimo_timestamp_zec
     while True:
@@ -301,11 +292,9 @@ def bucle_alertas_15m():
                     
                     if coin == "BTC" and candle_cerrada_time > ultimo_timestamp_btc:
                         ultimo_timestamp_btc = candle_cerrada_time
-                        print(f"Disparando reporte único 15m para BTC...")
                         enviar_reporte_automatico(coin)
                     elif coin == "ZEC" and candle_cerrada_time > ultimo_timestamp_zec:
                         ultimo_timestamp_zec = candle_cerrada_time
-                        print(f"Disparando reporte único 15m para ZEC...")
                         enviar_reporte_automatico(coin)
         except Exception as e:
             print(f"Error crítico en bucle_alertas_15m: {e}")
@@ -331,12 +320,10 @@ def enviar_reporte_automatico(coin):
     except Exception as e:
         print(f"No se pudo enviar la alerta automática de {coin}: {e}")
 
-# --- 5. ARRANQUE ---
 def arrancar_bot_telegram():
     while True:
         try:
             bot.remove_webhook()
-            print("Iniciando polling de Telegram...")
             bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
         except Exception as e:
             print(f"Error crítico en polling de Telegram: {e}")
