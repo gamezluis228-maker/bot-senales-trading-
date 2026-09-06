@@ -2,6 +2,8 @@ import os
 import telebot
 from telebot import types
 import ccxt
+from flask import Flask
+import threading
 
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 bingx_api_key = os.getenv('BINGX_API_KEY')
@@ -17,6 +19,15 @@ exchange = ccxt.bingx({
         'defaultType': 'swap',
     }
 })
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot de Trading activo y en línea!"
+
+def run_flask():
+    app.run(host='0.0.0.0', port=8080)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -107,6 +118,9 @@ def manejar_acciones(call):
             bot.send_message(call.message.chat.id, f"Detalle del error: {str(e)}")
 
 if __name__ == "__main__":
+    t = threading.Thread(target=run_flask)
+    t.start()
+
     try:
         bot.remove_webhook()
     except Exception:
