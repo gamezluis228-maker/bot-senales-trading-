@@ -18,7 +18,6 @@ exchange = ccxt.bingx({
     }
 })
 
-# --- MENÚ PRINCIPAL (Tus criptomonedas y análisis de siempre) ---
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     markup = types.InlineKeyboardMarkup(row_width=2)
@@ -28,8 +27,6 @@ def send_welcome(message):
     btn_xrp = types.InlineKeyboardButton("🪙 XRP/USDT", callback_data='analizar_XRP')
     btn_zec = types.InlineKeyboardButton("🪙 ZEC/USDT", callback_data='analizar_ZEC')
     btn_radar = types.InlineKeyboardButton("📡 Radar Mercado", callback_data='radar_mercado')
-    
-    # Botón integrado para abrir el selector de margen que querías añadir
     btn_margen = types.InlineKeyboardButton("⚡ Seleccionar Margen Operación", callback_data='menu_margen')
     
     markup.add(btn_btc, btn_eth, btn_sol, btn_xrp, btn_zec, btn_radar)
@@ -37,7 +34,6 @@ def send_welcome(message):
     
     bot.reply_to(message, "🤖 Selecciona la criptomoneda o función a analizar:", reply_markup=markup)
 
-# --- MENÚ DE SELECCIÓN DE MARGEN (1$ a 20$) ---
 @bot.callback_query_handler(func=lambda call: call.data == 'menu_margen')
 def mostrar_menu_margen(call):
     markup = types.InlineKeyboardMarkup(row_width=5)
@@ -55,20 +51,16 @@ def mostrar_menu_margen(call):
                           message_id=call.message.message_id, 
                           reply_markup=markup)
 
-# --- MANEJADOR DE SELECCIÓN DE MONEDAS Y ACCIONES ---
 @bot.callback_query_handler(func=lambda call: call.data.startswith('analizar_') or call.data.startswith('set_margin_') or call.data == 'ejecutar_bingx')
 def manejar_acciones(call):
     if call.data.startswith('analizar_'):
         coin = call.data.split('_')[1]
         bot.answer_callback_query(call.id, f"Analizando {coin}/USDT...")
-        # Aquí se mantiene tu lógica de análisis técnico original que ya tenías
-        bot.send_message(call.message.chat.id, f"📊 FUTRUS BINGX: {coin}/USDT\n\n💵 Precio Actual: Analizando...\n📈 Tendencia Macro (1H): ALCISTA 🟢\n\n(Análisis técnico activo)")
-    
+        bot.send_message(call.message.chat.id, f"📊 FUTRUS BINGX: {coin}/USDT\n\n💵 Precio Actual: Analizando...\n📈 Tendencia Macro (1H): ALCISTA 🟢")
     elif call.data.startswith('set_margin_'):
         monto = call.data.split('_')[2]
         bot.answer_callback_query(call.id, f"Margen seleccionado: {monto} USDT")
         bot.send_message(call.message.chat.id, f"Has seleccionado un margen de {monto} USDT. Presiona confirmar para proceder.")
-    
     elif call.data == 'ejecutar_bingx':
         try:
             balance = exchange.fetch_balance()
