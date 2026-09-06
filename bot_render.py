@@ -22,7 +22,6 @@ exchange = ccxt.bingx({
 def home():
     return "Bot Activo"
 
-# --- FUNCIÓN DE EJECUCIÓN SEGURA (Stop Loss 4% y Spot/Swap) ---
 def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
     try:
         if tipo_mercado == 'swap':
@@ -57,21 +56,24 @@ def procesar_operacion_segura(symbol, tipo_mercado, side, amount_usdt):
         return False, 0, str(e)
 
 
-# --- MANEJADOR DE TELEGRAM BLINDADO CONTRA ERRORES DE LISTA ---
+# --- MANEJADOR DE TELEGRAM BLINDADO ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     try:
+        # Imprime en los logs de Render qué es lo que llegó exactamente del botón
+        print(f"DEBUG - call.data recibido: {call.data}")
+        
         datos = call.data.split("_")
         
-        # Validar que el botón tenga el formato correcto de 4 partes (ej: APT_swap_buy_10)
         if len(datos) < 4:
-            bot.answer_callback_query(call.id, "Acción no reconocida o formato antiguo.")
+            bot.answer_callback_query(call.id, "Formato de botón no válido.")
+            bot.send_message(call.message.chat.id, f"⚠️ El botón envió datos incompletos: '{call.data}'")
             return
 
         simbolo = datos[0]
-        mercado = datos[1]  # 'swap' o 'spot'
-        accion = datos[2]   # 'buy' o 'sell'
-        margen = float(datos[3])  # Entre 1 y 20 USDT
+        mercado = datos[1]
+        accion = datos[2]
+        margen = float(datos[3])
 
         bot.answer_callback_query(call.id, "Procesando orden...")
 
@@ -91,10 +93,9 @@ def callback_query(call):
             bot.send_message(call.message.chat.id, f"❌ Error en el exchange:\n{resultado}")
             
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Error: {str(e)}")
+        bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
 
-# --- ARRANQUE EN SEGUNDO PLANO ---
 def iniciar_bot():
     bot.remove_webhook()
     bot.infinity_polling(skip_pending=True)
@@ -106,3 +107,4 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+    
