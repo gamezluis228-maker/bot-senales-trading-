@@ -14,7 +14,8 @@ SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-ULTIMO_CHAT_ID = None
+# ID de Telegram configurado de forma fija
+ULTIMO_CHAT_ID = 7115547861
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
 
@@ -27,7 +28,7 @@ exchange = ccxt.bingx({
 
 @app.route('/')
 def home():
-    return "Bot de Trading y Análisis Activo con TP/SL Activos"
+    return "Bot Activo con ID Fijo y Doble Temporalidad (1H y 15m)"
 
 # --- FUNCIONES DE CÁLCULO TÉCNICO REAL ---
 def calcular_rsi(closes, period=14):
@@ -71,6 +72,8 @@ def calcular_adx(highs, lows, closes, period=14):
 def obtener_analisis_tecnico(symbol):
     try:
         market_symbol = f"{symbol}/USDT:USDT"
+        
+        # 1. Macro 1H
         ohlcv_1h = exchange.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
         closes_1h = [x[4] for x in ohlcv_1h]
         highs_1h = [x[2] for x in ohlcv_1h]
@@ -79,42 +82,57 @@ def obtener_analisis_tecnico(symbol):
         precio_actual = closes_1h[-1]
         rsi_1h = calcular_rsi(closes_1h)
         adx_1h = calcular_adx(highs_1h, lows_1h, closes_1h)
+        resistencia_1h = max(highs_1h[-10:])
+        soporte_1h = min(lows_1h[-10:])
+        tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
+
+        # 2. Corto Plazo 15M
+        ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
+        closes_15m = [x[4] for x in ohlcv_15m]
+        highs_15m = [x[2] for x in ohlcv_15m]
+        lows_15m = [x[3] for x in ohlcv_15m]
         
-        resistencia = max(highs_1h[-10:])
-        soporte = min(lows_1h[-10:])
-        
-        if adx_1h > 20:
-            tendencia_macro = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
-            estado_mercado = "TENDENCIA ACTIVA"
-            pausa_bot = "Bot operando con tendencia."
+        rsi_15m = calcular_rsi(closes_15m)
+        adx_15m = calcular_adx(highs_15m, lows_15m, closes_15m)
+        tendencia_15m = "ALCISTA 🟢" if closes_15m[-1] > closes_15m[-10] else "BAJISTA 🔴"
+
+        if adx_15m > 20:
+            estado_mercado = "TENDENCIA ACTIVA EN 15M"
+            pausa_bot = "Estructura de 15m con fuerza tendencial."
         else:
-            tendencia_macro = "LATERAL / RANGO"
-            estado_mercado = "MERCADO LATERAL / RANGO PLANO (ADX < 20)"
-            pausa_bot = "Bot en pausa defensiva por rango lateral."
+            estado_mercado = "MERCADO LATERAL / RANGO EN 15M (ADX < 20)"
+            pausa_bot = "Precaución: Rango plano en corto plazo."
 
         return {
             "precio": precio_actual,
-            "tendencia": tendencia_macro,
-            "adx": round(adx_1h, 1),
-            "rsi": round(rsi_1h, 1),
-            "resistencia": resistencia,
-            "soporte": soporte,
+            "tendencia_1h": tendencia_1h,
+            "adx_1h": round(adx_1h, 1),
+            "rsi_1h": round(rsi_1h, 1),
+            "tendencia_15m": tendencia_15m,
+            "adx_15m": round(adx_15m, 1),
+            "rsi_15m": round(rsi_15m, 1),
+            "resistencia": resistencia_1h,
+            "soporte": soporte_1h,
             "estado": estado_mercado,
             "pausa": pausa_bot
         }
     except Exception as e:
+        print(f"Error en obtener_analisis_tecnico para {symbol}: {e}")
         return {
             "precio": 1000.0,
-            "tendencia": "NEUTRAL",
-            "adx": 14.0,
-            "rsi": 50.0,
+            "tendencia_1h": "NEUTRAL",
+            "adx_1h": 14.0,
+            "rsi_1h": 50.0,
+            "tendencia_15m": "NEUTRAL",
+            "adx_15m": 14.0,
+            "rsi_15m": 50.0,
             "resistencia": 1050.0,
             "soporte": 950.0,
             "estado": "MERCADO LATERAL",
-            "pausa": "Bot en pausa defensiva por rango lateral."
+            "pausa": "Error al consultar temporalidades."
         }
 
-# --- 1. MENÚ PRINCIPAL Y REGISTRO DE CHAT ---
+# --- 1. MENÚ PRINCIPAL ---
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
@@ -129,7 +147,7 @@ def mostrar_menu_principal(message):
 
     bot.send_message(
         message.chat.id, 
-        "CRYPTO ANÁLISIS MERCADOS 🟢\n\n🤖 Selecciona una criptomoneda para su análisis técnico:\n*(Alertas automáticas de 15m para BTC y ZEC activas)*", 
+        "CRYPTO ANÁLISIS MULTITEMPORAL 🟢\n\n🤖 Selecciona una criptomoneda para ver 1H y 15M:\n*(Alertas automáticas de 15m para BTC y ZEC activas)*", 
         reply_markup=markup
     )
 
@@ -160,11 +178,11 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
         params = {}
         if mercado == 'swap':
             if side == 'buy':
-                stop_loss_price = precio_actual * (1 - 0.04)     # -4% de Riesgo
-                take_profit_price = precio_actual * (1 + 0.08)   # +8% de Beneficio (1:2)
+                stop_loss_price = precio_actual * (1 - 0.04)
+                take_profit_price = precio_actual * (1 + 0.08)
             else:
-                stop_loss_price = precio_actual * (1 + 0.04)     # +4% de Riesgo
-                take_profit_price = precio_actual * (1 - 0.08)   # -8% de Beneficio (1:2)
+                stop_loss_price = precio_actual * (1 + 0.04)
+                take_profit_price = precio_actual * (1 - 0.08)
             
             params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
             params['takeProfitPrice'] = exchange.price_to_precision(market_symbol, take_profit_price)
@@ -196,22 +214,23 @@ def callback_query(call):
 
         if accion == "analisis" and len(datos) >= 2:
             coin = datos[1]
-            bot.answer_callback_query(call.id, f"Calculando indicadores para {coin}...")
+            bot.answer_callback_query(call.id, f"Calculando temporalidades para {coin}...")
             
             analisis = obtener_analisis_tecnico(coin)
 
             reporte = (
                 f"⚡ FUTUROS BINGX: {coin}/USDT\n\n"
-                f"💵 Precio Actual: ${analisis['precio']:,.2f}\n"
-                f"🌅 Tendencia Macro (1H): {analisis['tendencia']}\n"
-                f"📊 Fuerza Tendencia (ADX): {analisis['adx']} | RSI: {analisis['rsi']}\n"
-                f"📈 Estructura (15m): NEUTRAL\n\n"
+                f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
+                f"📊 **ANÁLISIS MACRO (1H):**\n"
+                f"• Tendencia: {analisis['tendencia_1h']}\n"
+                f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
+                f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
+                f"• Tendencia: {analisis['tendencia_15m']}\n"
+                f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
                 f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
                 f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
-                f"🎯 SEÑAL DE OPERACIÓN:\n"
+                f"🎯 SEÑAL:\n"
                 f"⏳ {analisis['estado']}\n"
-                f"• ADX: {analisis['adx']} (Sin fuerza tendencial)\n"
-                f"• Soporte: ${analisis['soporte']:,.2f} | Resistencia: ${analisis['resistencia']:,.2f}\n"
                 f"• {analisis['pausa']}\n\n"
                 f"⚙️ **Selecciona margen y tipo de operación para {coin}:**"
             )
@@ -257,45 +276,45 @@ def callback_query(call):
 
         elif call.data == "radar_mercado":
             bot.answer_callback_query(call.id, "Radar activo")
-            bot.send_message(call.message.chat.id, "📡 **Radar de Mercado:** Filtro anti-rangos laterales activo.")
+            bot.send_message(call.message.chat.id, "📡 **Radar de Mercado:** Filtro multitemporal activo.")
 
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
 # --- 4. HILO DE ALERTAS CADA 15 MIN ---
 def bucle_alertas_15m():
-    global ULTIMO_CHAT_ID, ultimo_timestamp_btc, ultimo_timestamp_zec
+    global ultimo_timestamp_btc, ultimo_timestamp_zec
     while True:
         try:
-            if ULTIMO_CHAT_ID:
-                for coin in ["BTC", "ZEC"]:
-                    market_symbol = f"{coin}/USDT:USDT"
-                    ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
-                    if ohlcv_15m:
-                        current_candle_time = ohlcv_15m[-1][0]
-                        
-                        if coin == "BTC" and current_candle_time != ultimo_timestamp_btc:
-                            ultimo_timestamp_btc = current_candle_time
-                            enviar_reporte_automatico(coin)
-                        elif coin == "ZEC" and current_candle_time != ultimo_timestamp_zec:
-                            ultimo_timestamp_zec = current_candle_time
-                            enviar_reporte_automatico(coin)
+            for coin in ["BTC", "ZEC"]:
+                market_symbol = f"{coin}/USDT:USDT"
+                ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=5)
+                if ohlcv_15m and len(ohlcv_15m) >= 2:
+                    candle_cerrada_time = ohlcv_15m[-2][0]
+                    print(f"[{coin}] Timestamp vela cerrada: {candle_cerrada_time} | Anterior: BTC={ultimo_timestamp_btc}, ZEC={ultimo_timestamp_zec}")
+                    
+                    if coin == "BTC" and candle_cerrada_time != ultimo_timestamp_btc:
+                        print(f"¡Disparando alerta 15m para BTC!")
+                        ultimo_timestamp_btc = candle_cerrada_time
+                        enviar_reporte_automatico(coin)
+                    elif coin == "ZEC" and candle_cerrada_time != ultimo_timestamp_zec:
+                        print(f"¡Disparando alerta 15m para ZEC!")
+                        ultimo_timestamp_zec = candle_cerrada_time
+                        enviar_reporte_automatico(coin)
         except Exception as e:
-            print(f"Error en bucle de alertas 15m: {e}")
+            print(f"Error crítico en bucle_alertas_15m: {e}")
         
         time.sleep(30)
 
 def enviar_reporte_automatico(coin):
     try:
-        if not ULTIMO_CHAT_ID:
-            return
         analisis = obtener_analisis_tecnico(coin)
         reporte = (
-            f"🔔 **REPORTE AUTOMÁTICO 15M** 🔔\n"
+            f"🔔 **REPORTE AUTOMÁTICO 15M / 1H** 🔔\n"
             f"⚡ Activo: {coin}/USDT\n\n"
-            f"💵 Precio Actual: ${analisis['precio']:,.2f}\n"
-            f"🌅 Tendencia Macro (1H): {analisis['tendencia']}\n"
-            f"📊 Fuerza Tendencia (ADX): {analisis['adx']} | RSI: {analisis['rsi']}\n\n"
+            f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
+            f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
+            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
             f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
             f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
             f"⏳ Estado: {analisis['estado']}\n"
