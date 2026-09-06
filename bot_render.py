@@ -22,23 +22,16 @@ exchange = ccxt.bingx({
 def home():
     return "Bot Activo"
 
-# --- MANEJADOR DE MENSAJES DE TEXTO Y COMANDOS ---
 @bot.message_handler(commands=['start', 'help'])
 def enviar_bienvenida(message):
-    bot.reply_to(message, "¡Hola! El bot está activo y conectado correctamente a Render.")
+    bot.reply_to(message, "¡Hola! El bot está activo y listo para operar.")
 
-@bot.message_handler(func=lambda message: True)
-def responder_texto(message):
-    bot.reply_to(message, f"Recibido tu mensaje: {message.text}")
-
-
-# --- MANEJADOR DE BOTONES ---
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     try:
         datos = call.data.split("_")
         if len(datos) < 4:
-            bot.answer_callback_query(call.id, "Formato de botón no válido.")
+            bot.answer_callback_query(call.id, "Formato no válido.")
             return
 
         simbolo = datos[0]
@@ -46,19 +39,54 @@ def callback_query(call):
         accion = datos[2]
         margen = float(datos[3])
 
-        bot.answer_callback_query(call.id, "Procesando orden...")
-        
-        # Lógica rápida de respuesta para verificar que el botón ya opera
-        bot.send_message(call.message.chat.id, f"✅ Procesando {accion.upper()} en {mercado.upper()} para {simbolo} por ${margen} USDT")
-            
+        bot.answer_callback_query(call.id, "Procesando...")
+
+        if mercado == 'swap':
+            market_symbol = f"{simbolo}:USDT"
+            exchange.options['defaultType'] = 'swap'
+            exchange.set_leverage(5, market_symbol)
+        else:
+            market_symbol = simbolo
+            exchange.options['defaultType'] = 'spot'
+
+        ticker = exchange.fetch_ticker(market_symbol)
+        precio_actual = ticker['last']
+        amount_tokens = margen / precio_actual
+
+        params = {}
+        if mercado == 'swap':
+            if accion == 'buy':
+                stop_loss_price = precio_actual * (1 - 0.04)
+            else:
+                stop_loss_price = precio_actual * (1 + 0.04)
+            params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
+
+        exchange.create_order(
+            symbol=market_symbol,
+            type='market',
+            side=accion,
+            amount=amount_tokens,
+            params=params
+        )
+
+        bot.send_message(
+            call.message.chat.id,
+            f"✅ **¡Operación Ejecutada!**\n\n"
+            f"• Activo: {simbolo}\n"
+            f"• Mercado: {mercado.upper()}\n"
+            f"• Margen: ${margen} USDT\n"
+            f"• Entrada: {precio_actual}\n"
+            f"• Stop Loss: 4%"
+        )
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error: {str(e)}")
 
-
-# --- INICIO DEL HILO DEL BOT ---
 def arrancar_bot():
-    bot.remove_webhook()
-    bot.infinity_polling(skip_pending=True)
+    try:
+        bot.remove_webhook()
+        bot.infinity_polling(skip_pending=True)
+    except Exception as e:
+        print(f"Error en bot: {e}")
 
 if __name__ == "__main__":
     t = threading.Thread(target=arrancar_bot)
