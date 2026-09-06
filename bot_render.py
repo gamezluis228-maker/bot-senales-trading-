@@ -58,11 +58,8 @@ def manejar_acciones(call):
         bot.answer_callback_query(call.id, f"Analizando {symbol} en BingX Futuros...")
         
         try:
-            # Obtener datos reales de BingX para el análisis técnico
             ticker = exchange.fetch_ticker(symbol)
             precio_actual = ticker['last']
-            
-            # Cálculo base de soportes y resistencias aproximados en base al precio actual
             soporte = round(precio_actual * 0.99, 2)
             resistencia = round(precio_actual * 1.01, 2)
             
@@ -102,6 +99,10 @@ def manejar_acciones(call):
             bot.send_message(call.message.chat.id, f"Detalle del error: {str(e)}")
 
 if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.infinity_polling(timeout=60, long_polling_timeout=60)
+    try:
+        bot.remove_webhook()
+    except Exception:
+        pass
+    # Forzamos la limpieza del hilo de conexiones anteriores para evitar el error 409
+    bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
     
