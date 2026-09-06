@@ -8,27 +8,29 @@ from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_KEY = os.getenv("BINGX_API_KEY")
-SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
+
+# --- TUS CREDENCIALES FIJAS DE BINGX ---
+API_KEY = "PEGA_AQUÍ_TU_API_KEY_DE_BINGX"
+SECRET_KEY = "PEGA_AQUÍ_TU_SECRET_KEY_DE_BINGX"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ID de Telegram configurado de forma fija para asegurar los reportes
+# ID de Telegram configurado de forma fija
 ULTIMO_CHAT_ID = 7115547861
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
 
 exchange = ccxt.bingx({
-    'apiKey': API_KEY if API_KEY else '',
-    'secret': SECRET_KEY if SECRET_KEY else '',
+    'apiKey': API_KEY,
+    'secret': SECRET_KEY,
     'enableRateLimit': True,
     'options': {'defaultType': 'swap'}
 })
 
 @app.route('/')
 def home():
-    return "Bot Activo - Multitemporal 1H y 15M"
+    return "Bot Activo - Multitemporal 1H y 15M con Credenciales Fijas"
 
 # --- FUNCIONES DE CÁLCULO TÉCNICO REAL ---
 def calcular_rsi(closes, period=14):
@@ -155,8 +157,8 @@ def mostrar_menu_principal(message):
 # --- 2. MOTOR DE EJECUCIÓN CON TP (8%) Y SL (4%) EN BINGX ---
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
-        if not API_KEY or not SECRET_KEY:
-            return False, 0, "Faltan las credenciales (API_KEY o SECRET_KEY) en las variables de entorno de Render."
+        if not API_KEY or API_KEY == "PEGA_AQUÍ_TU_API_KEY_DE_BINGX":
+            return False, 0, "Faltan configurar las llaves de BingX directamente en el código."
 
         if mercado == 'swap':
             market_symbol = f"{symbol}/USDT:USDT"
