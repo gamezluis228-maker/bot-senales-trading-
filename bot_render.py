@@ -223,4 +223,3 @@ if __name__ == "__main__":
 
     print("Iniciando bot con filtro anti-lateral estricto...")
     bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=30)
-            
