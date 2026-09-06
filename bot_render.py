@@ -13,9 +13,10 @@ SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
+# Inicialización segura de CCXT BingX
 exchange = ccxt.bingx({
-    'apiKey': API_KEY,
-    'secret': SECRET_KEY,
+    'apiKey': API_KEY if API_KEY else '',
+    'secret': SECRET_KEY if SECRET_KEY else '',
     'enableRateLimit': True,
     'options': {'defaultType': 'swap'}
 })
@@ -35,13 +36,12 @@ def calcular_rsi(closes, period=14):
     if down == 0:
         return 100.0
     rs = up / down
-    rsi = 100.data = 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
     return float(rsi)
 
 def calcular_adx(highs, lows, closes, period=14):
     if len(closes) < period + 1:
         return 15.0
-    # Cálculo simplificado y robusto de fuerza de tendencia ADX
     highs = np.array(highs)
     lows = np.array(lows)
     closes = np.array(closes)
@@ -67,7 +67,6 @@ def calcular_adx(highs, lows, closes, period=14):
 def obtener_analisis_tecnico(symbol):
     try:
         market_symbol = f"{symbol}/USDT:USDT"
-        # Obtener velas de 1 hora para tendencia macro
         ohlcv_1h = exchange.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
         closes_1h = [x[4] for x in ohlcv_1h]
         highs_1h = [x[2] for x in ohlcv_1h]
@@ -80,7 +79,6 @@ def obtener_analisis_tecnico(symbol):
         resistencia = max(highs_1h[-10:])
         soporte = min(lows_1h[-10:])
         
-        # Lógica de Tendencia Macro
         if adx_1h > 20:
             tendencia_macro = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
             estado_mercado = "TENDENCIA ACTIVA"
@@ -101,7 +99,6 @@ def obtener_analisis_tecnico(symbol):
             "pausa": pausa_bot
         }
     except Exception as e:
-        # Fallback por si falla la red con el exchange momentáneamente
         return {
             "precio": 1000.0,
             "tendencia": "NEUTRAL",
@@ -132,6 +129,9 @@ def mostrar_menu_principal(message):
 # --- 2. MOTOR DE EJECUCIÓN BLINDADO PARA HEDGE MODE EN BINGX ---
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
+        if not API_KEY or not SECRET_KEY:
+            return False, 0, "Faltan las credenciales (API_KEY o SECRET_KEY) en las variables de entorno de Render."
+
         if mercado == 'swap':
             market_symbol = f"{symbol}/USDT:USDT"
             exchange.options['defaultType'] = 'swap'
@@ -185,7 +185,6 @@ def callback_query(call):
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Calculando indicadores para {coin}...")
             
-            # Obtener el análisis técnico real basado en datos del mercado
             analisis = obtener_analisis_tecnico(coin)
 
             reporte = (
@@ -204,7 +203,6 @@ def callback_query(call):
                 f"⚙️ **Selecciona margen y tipo de operación para {coin}:**"
             )
 
-            # Botones de margen limpios y cortos
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🚀 Long ($5)", callback_data=f"trade_{coin}_swap_buy_5"),
