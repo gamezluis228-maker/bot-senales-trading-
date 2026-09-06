@@ -1,4 +1,4 @@
-import os
+fkfnfimport os
 import telebot
 from telebot import types
 import ccxt
