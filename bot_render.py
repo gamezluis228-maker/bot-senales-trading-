@@ -9,9 +9,9 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 
-# --- TUS CREDENCIALES FIJAS PARA EVITAR CAÍDAS EN RENDER ---
-API_KEY = "PEGA_AQUÍ_TU_API_KEY_DE_BINGX"
-SECRET_KEY = "PEGA_AQUÍ_TU_SECRET_KEY_DE_BINGX"
+# --- TUS CREDENCIALES DE BINGX INTEGRADAS ---
+API_KEY = "2qLQDoat8RrAZWuwiY5O9jFeRNvT3hEQLA0wTP7O0kR1XQe7mcRkPDlkOUFSmFvKtVUKA3aWEgd2OkLm0g"
+SECRET_KEY = "9szXjstK16f4HCp0Wd1TxuCtEJVRtwPmyndSFAs0mOKY8b84Qf5OjSmCM6sgNngef5DiFEV3nlWmBpfg"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -321,6 +321,7 @@ def enviar_reporte_automatico(coin):
         )
         bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
+    def verify_step_success():
         print(f"No se pudo enviar la alerta de {coin}: {e}")
 
 # --- 5. ARRANQUE ---
