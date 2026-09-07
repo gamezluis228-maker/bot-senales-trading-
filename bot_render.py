@@ -142,8 +142,9 @@ def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
 
-    markup = InlineKeyboardMarkup(row_width=3)
-    monedas = ["BTC", "ETH", "SOL", "XRP", "DOGE", "ADA", "AVAX", "LINK", "DOT", "NEAR", "MATIC", "UNI", "LTC", "ATOM", "ZEC"]
+    markup = InlineKeyboardMarkup(row_width=2)
+    # Lista actualizada con las 4 monedas seleccionadas
+    monedas = ["BTC", "ETH", "XRP", "ZEC"]
     
     botones = [InlineKeyboardButton(coin, callback_data=f"analisis_{coin}") for coin in monedas]
     markup.add(*botones)
@@ -234,18 +235,17 @@ def callback_query(call):
                 f"⚙️ **Selecciona margen y tipo de operación para {coin}:**"
             )
 
+            # Botones actualizados con textos claros y montos de 2, 5, 10 (Futuros) y 5, 10 (Spot)
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
-                InlineKeyboardButton("🚀 Long ($5)", callback_data=f"trade_{coin}_swap_buy_5"),
-                InlineKeyboardButton("🚀 Long ($10)", callback_data=f"trade_{coin}_swap_buy_10"),
-                InlineKeyboardButton("📉 Short ($5)", callback_data=f"trade_{coin}_swap_sell_5"),
-                InlineKeyboardButton("📉 Short ($10)", callback_data=f"trade_{coin}_swap_sell_10"),
-                InlineKeyboardButton("🚀 Long ($15)", callback_data=f"trade_{coin}_swap_buy_15"),
-                InlineKeyboardButton("🚀 Long ($20)", callback_data=f"trade_{coin}_swap_buy_20"),
-                InlineKeyboardButton("📉 Short ($15)", callback_data=f"trade_{coin}_swap_sell_15"),
-                InlineKeyboardButton("📉 Short ($20)", callback_data=f"trade_{coin}_swap_sell_20"),
-                InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10"),
-                InlineKeyboardButton("🟢 Spot ($20)", callback_data=f"trade_{coin}_spot_buy_20")
+                InlineKeyboardButton("🟢 Abrir Long ($2)", callback_data=f"trade_{coin}_swap_buy_2"),
+                InlineKeyboardButton("🟢 Abrir Long ($5)", callback_data=f"trade_{coin}_swap_buy_5"),
+                InlineKeyboardButton("🟢 Abrir Long ($10)", callback_data=f"trade_{coin}_swap_buy_10"),
+                InlineKeyboardButton("🔴 Abrir Short ($2)", callback_data=f"trade_{coin}_swap_sell_2"),
+                InlineKeyboardButton("🔴 Abrir Short ($5)", callback_data=f"trade_{coin}_swap_sell_5"),
+                InlineKeyboardButton("🔴 Abrir Short ($10)", callback_data=f"trade_{coin}_swap_sell_10"),
+                InlineKeyboardButton("🟢 Spot ($5)", callback_data=f"trade_{coin}_spot_buy_5"),
+                InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10")
             )
 
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
