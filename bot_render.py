@@ -8,7 +8,7 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- VARIABLES DE ENTORNO (Mantenidas tal cual tu configuración) ---
+# --- VARIABLES DE ENTORNO EN RENDER ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("BINGX_API_KEY")
 SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
@@ -30,14 +30,12 @@ ultimos_timestamps = {
 posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
-# CONFIGURACIÓN DE CCXT PARA BINGX
+# Configuración base del cliente CCXT
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'enableRateLimit': True,
-    'options': {
-        'defaultType': 'swap'
-    }
+    'options': {'defaultType': 'swap'}
 })
 
 try:
@@ -181,6 +179,10 @@ def mostrar_menu_principal(message):
 
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
+        # Aseguramos que las credenciales estén inyectadas antes de operar
+        exchange.apiKey = os.getenv("BINGX_API_KEY")
+        exchange.secret = os.getenv("BINGX_SECRET_KEY")
+
         if mercado == 'swap':
             market_symbol = f"{symbol}/USDT:USDT"
             exchange.options['defaultType'] = 'swap'
@@ -320,7 +322,10 @@ def bucle_monitoreo_posiciones():
                 if not posiciones_activas:
                     continue
                 
+                exchange.apiKey = os.getenv("BINGX_API_KEY")
+                exchange.secret = os.getenv("BINGX_SECRET_KEY")
                 exchange.options['defaultType'] = 'swap'
+                
                 try:
                     posiciones_abiertas_bingx = exchange.fetch_positions()
                 except Exception:
@@ -424,4 +429,3 @@ if __name__ == "__main__":
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
-            
