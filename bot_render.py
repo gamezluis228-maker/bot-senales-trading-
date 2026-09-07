@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+import requests
 import telebot
 import ccxt
 import numpy as np
@@ -11,14 +12,19 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("BINGX_API_KEY")
 SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
+RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render genera esta variable automáticamente
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 # ID de Telegram configurado fijo
 ULTIMO_CHAT_ID = 7115547861
-ultimo_timestamp_btc = 0
-ultimo_timestamp_zec = 0
+
+# Diccionario para controlar el último timestamp por moneda
+ultimos_timestamps = {
+    "BTC": 0,
+    "ZEC": 0
+}
 
 # Lista para registrar las operaciones activas y monitorear su cierre
 posiciones_activas = []
@@ -41,6 +47,19 @@ except Exception as e:
 @app.route('/')
 def home():
     return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre"
+
+# --- BUCLE DE AUTO-PING PARA EVITAR QUE RENDER DUERMA EL BOT ---
+def bucle_keep_alive():
+    """Hace una petición a la propia app en Render para no entrar en suspension (Sleep)"""
+    time.sleep(10)
+    while True:
+        try:
+            url = RENDER_APP_URL if RENDER_APP_URL else "http://127.0.0.1:5000/"
+            requests.get(url, timeout=10)
+            print("Keep-Alive: Ping enviado con éxito a la aplicación.")
+        except Exception as e:
+            print(f"Error en Keep-Alive: {e}")
+        time.sleep(600)  # Envía ping cada 10 minutos
 
 def calcular_rsi(closes, period=14):
     if len(closes) < period + 1:
@@ -200,7 +219,6 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
             params=params
         )
 
-        # Si es futuros (swap), registramos la posición para monitorearla
         if mercado == 'swap':
             with bloqueo_posiciones:
                 posiciones_activas.append({
@@ -294,7 +312,6 @@ def callback_query(call):
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
 def bucle_monitoreo_posiciones():
-    """Vigila si las posiciones abiertas en futuros se cierran para notificar Take Profit o Stop Loss"""
     while True:
         try:
             time.sleep(15)
@@ -302,7 +319,6 @@ def bucle_monitoreo_posiciones():
                 if not posiciones_activas:
                     continue
                 
-                # Consultamos las posiciones abiertas actuales en BingX
                 exchange.options['defaultType'] = 'swap'
                 try:
                     posiciones_abiertas_bingx = exchange.fetch_positions()
@@ -314,14 +330,12 @@ def bucle_monitoreo_posiciones():
                     if float(pos.get('contracts', 0)) > 0:
                         simbolos_activos_en_exchange.add((pos['symbol'], pos.get('side', '').upper()))
 
-                # Revisamos cuáles de nuestras posiciones ya no están activas (se cerraron por TP o SL)
                 nuevas_activas = []
                 for reg in posiciones_activas:
                     clave = (reg['symbol'], reg['side'])
                     if clave in simbolos_activos_en_exchange:
                         nuevas_activas.append(reg)
                     else:
-                        # ¡La posición se cerró! Enviamos la notificación al chat
                         try:
                             bot.send_message(
                                 reg['chat_id'],
@@ -340,25 +354,27 @@ def bucle_monitoreo_posiciones():
             print(f"Error en bucle_monitoreo_posiciones: {e}")
 
 def bucle_alertas_15m():
-    global ultimo_timestamp_btc, ultimo_timestamp_zec
+    global ultimos_timestamps
+    time.sleep(5)
+    
     while True:
-        try:
-            for coin in ["BTC", "ZEC"]:
+        for coin in ["BTC", "ZEC"]:
+            try:
                 market_symbol = f"{coin}/USDT:USDT"
                 ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
+                
                 if ohlcv_15m and len(ohlcv_15m) >= 2:
                     candle_cerrada_time = ohlcv_15m[-2][0]
                     
-                    if coin == "BTC" and candle_cerrada_time > ultimo_timestamp_btc:
-                        ultimo_timestamp_btc = candle_cerrada_time
+                    if candle_cerrada_time > ultimos_timestamps[coin]:
+                        ultimos_timestamps[coin] = candle_cerrada_time
                         enviar_reporte_automatico(coin)
-                    elif coin == "ZEC" and candle_cerrada_time > ultimo_timestamp_zec:
-                        ultimo_timestamp_zec = candle_cerrada_time
-                        enviar_reporte_automatico(coin)
-        except Exception as e:
-            print(f"Error crítico en bucle_alertas_15m: {e}")
+            except Exception as e:
+                print(f"Error comprobando vela 15M para {coin}: {e}")
+            
+            time.sleep(2)
         
-        time.sleep(60)
+        time.sleep(30)
 
 def enviar_reporte_automatico(coin):
     try:
@@ -389,18 +405,25 @@ def arrancar_bot_telegram():
             time.sleep(10)
 
 if __name__ == "__main__":
+    # Hilo para Telegram
     hilo_bot = threading.Thread(target=arrancar_bot_telegram)
     hilo_bot.daemon = True
     hilo_bot.start()
 
+    # Hilo para alertas automáticas 15m
     hilo_alertas = threading.Thread(target=bucle_alertas_15m)
     hilo_alertas.daemon = True
     hilo_alertas.start()
 
-    # Hilo encargado de vigilar las operaciones abiertas en futuros exclusivamente
+    # Hilo monitoreo de posiciones en BingX
     hilo_monitoreo = threading.Thread(target=bucle_monitoreo_posiciones)
     hilo_monitoreo.daemon = True
     hilo_monitoreo.start()
+
+    # Hilo Keep-Alive para evitar que Render se duerma
+    hilo_ping = threading.Thread(target=bucle_keep_alive)
+    hilo_ping.daemon = True
+    hilo_ping.start()
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
