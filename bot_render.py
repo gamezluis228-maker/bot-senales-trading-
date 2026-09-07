@@ -20,6 +20,10 @@ ULTIMO_CHAT_ID = 7115547861
 ultimo_timestamp_btc = 0
 ultimo_timestamp_zec = 0
 
+# Lista para registrar las operaciones activas y monitorear su cierre
+posiciones_activas = []
+bloqueo_posiciones = threading.Lock()
+
 # CONFIGURACIÓN DE CCXT CON TUS VARIABLES DE RENDER
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
@@ -36,7 +40,7 @@ except Exception as e:
 
 @app.route('/')
 def home():
-    return "Bot Activo - Multitemporal 1H y 15M"
+    return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre"
 
 def calcular_rsi(closes, period=14):
     if len(closes) < period + 1:
@@ -195,6 +199,17 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
             amount=amount_tokens,
             params=params
         )
+
+        # Si es futuros (swap), registramos la posición para monitorearla
+        if mercado == 'swap':
+            with bloqueo_posiciones:
+                posiciones_activas.append({
+                    'symbol': market_symbol,
+                    'side': position_side,
+                    'chat_id': ULTIMO_CHAT_ID,
+                    'tiempo': time.time()
+                })
+
         return True, precio_actual, orden
     except Exception as e:
         return False, 0, str(e)
@@ -278,6 +293,52 @@ def callback_query(call):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
+def bucle_monitoreo_posiciones():
+    """Vigila si las posiciones abiertas en futuros se cierran para notificar Take Profit o Stop Loss"""
+    while True:
+        try:
+            time.sleep(15)
+            with bloqueo_posiciones:
+                if not posiciones_activas:
+                    continue
+                
+                # Consultamos las posiciones abiertas actuales en BingX
+                exchange.options['defaultType'] = 'swap'
+                try:
+                    posiciones_abiertas_bingx = exchange.fetch_positions()
+                except Exception:
+                    continue
+
+                simbolos_activos_en_exchange = set()
+                for pos in posiciones_abiertas_bingx:
+                    if float(pos.get('contracts', 0)) > 0:
+                        simbolos_activos_en_exchange.add((pos['symbol'], pos.get('side', '').upper()))
+
+                # Revisamos cuáles de nuestras posiciones ya no están activas (se cerraron por TP o SL)
+                nuevas_activas = []
+                for reg in posiciones_activas:
+                    clave = (reg['symbol'], reg['side'])
+                    if clave in simbolos_activos_en_exchange:
+                        nuevas_activas.append(reg)
+                    else:
+                        # ¡La posición se cerró! Enviamos la notificación al chat
+                        try:
+                            bot.send_message(
+                                reg['chat_id'],
+                                f"🔔 **¡OPERACIÓN CERRADA EN BINGX!** 🔔\n\n"
+                                f"• Activo: `{reg['symbol']}`\n"
+                                f"• Dirección: `{reg['side']}`\n"
+                                f"• Estado: La orden ha tocado su objetivo (Take Profit +8% o Stop Loss -4%). Revisa tu balance.",
+                                parse_mode="Markdown"
+                            )
+                        except Exception as ex:
+                            print(f"Error enviando alerta de cierre: {ex}")
+                
+                posiciones_activas[:] = nuevas_activas
+
+        except Exception as e:
+            print(f"Error en bucle_monitoreo_posiciones: {e}")
+
 def bucle_alertas_15m():
     global ultimo_timestamp_btc, ultimo_timestamp_zec
     while True:
@@ -335,6 +396,11 @@ if __name__ == "__main__":
     hilo_alertas = threading.Thread(target=bucle_alertas_15m)
     hilo_alertas.daemon = True
     hilo_alertas.start()
+
+    # Hilo encargado de vigilar las operaciones abiertas en futuros exclusivamente
+    hilo_monitoreo = threading.Thread(target=bucle_monitoreo_posiciones)
+    hilo_monitoreo.daemon = True
+    hilo_monitoreo.start()
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
