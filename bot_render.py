@@ -143,7 +143,6 @@ def mostrar_menu_principal(message):
     ULTIMO_CHAT_ID = message.chat.id
 
     markup = InlineKeyboardMarkup(row_width=2)
-    # Lista actualizada con las 4 monedas seleccionadas
     monedas = ["BTC", "ETH", "XRP", "ZEC"]
     
     botones = [InlineKeyboardButton(coin, callback_data=f"analisis_{coin}") for coin in monedas]
@@ -235,7 +234,6 @@ def callback_query(call):
                 f"⚙️ **Selecciona margen y tipo de operación para {coin}:**"
             )
 
-            # Botones actualizados con textos claros y montos de 2, 5, 10 (Futuros) y 5, 10 (Spot)
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🟢 Abrir Long ($2)", callback_data=f"trade_{coin}_swap_buy_2"),
