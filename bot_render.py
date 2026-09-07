@@ -8,11 +8,11 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- LECTURA CORRECTA DE TUS VARIABLES DE ENTORNO DE RENDER ---
+# --- VARIABLES DE ENTORNO (Mantenidas tal cual tu configuración) ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("BINGX_API_KEY")
 SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
-RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")  # Render genera esta variable automáticamente
+RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -30,12 +30,14 @@ ultimos_timestamps = {
 posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
-# CONFIGURACIÓN DE CCXT CON TUS VARIABLES DE RENDER
+# CONFIGURACIÓN DE CCXT PARA BINGX
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
     'enableRateLimit': True,
-    'options': {'defaultType': 'swap'}
+    'options': {
+        'defaultType': 'swap'
+    }
 })
 
 try:
@@ -48,9 +50,8 @@ except Exception as e:
 def home():
     return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre"
 
-# --- BUCLE DE AUTO-PING PARA EVITAR QUE RENDER DUERMA EL BOT ---
 def bucle_keep_alive():
-    """Hace una petición a la propia app en Render para no entrar en suspension (Sleep)"""
+    """Hace una petición a la propia app en Render para no entrar en suspensión (Sleep)"""
     time.sleep(10)
     while True:
         try:
@@ -59,7 +60,7 @@ def bucle_keep_alive():
             print("Keep-Alive: Ping enviado con éxito a la aplicación.")
         except Exception as e:
             print(f"Error en Keep-Alive: {e}")
-        time.sleep(600)  # Envía ping cada 10 minutos
+        time.sleep(600)
 
 def calcular_rsi(closes, period=14):
     if len(closes) < period + 1:
@@ -405,25 +406,22 @@ def arrancar_bot_telegram():
             time.sleep(10)
 
 if __name__ == "__main__":
-    # Hilo para Telegram
     hilo_bot = threading.Thread(target=arrancar_bot_telegram)
     hilo_bot.daemon = True
     hilo_bot.start()
 
-    # Hilo para alertas automáticas 15m
     hilo_alertas = threading.Thread(target=bucle_alertas_15m)
     hilo_alertas.daemon = True
     hilo_alertas.start()
 
-    # Hilo monitoreo de posiciones en BingX
     hilo_monitoreo = threading.Thread(target=bucle_monitoreo_posiciones)
     hilo_monitoreo.daemon = True
     hilo_monitoreo.start()
 
-    # Hilo Keep-Alive para evitar que Render se duerma
     hilo_ping = threading.Thread(target=bucle_keep_alive)
     hilo_ping.daemon = True
     hilo_ping.start()
 
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
+            
