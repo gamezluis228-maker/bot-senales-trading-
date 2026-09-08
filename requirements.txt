@@ -4,3 +4,6 @@ numpy>=1.21.0
 pandas
 ccxt
 flask
+python-telegram-bot
+ta
+apscheduler
