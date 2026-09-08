@@ -1,3 +1,4 @@
+import os
 import time
 import requests
 import pandas as pd
@@ -13,15 +14,15 @@ from telegram.ext import (
 )
 
 # ==========================================
-# CONFIGURACIÓN GENERAL Y CREDENCIALES
+# LECTURA DE VARIABLES DE ENTORNO (RENDER)
 # ==========================================
-TELEGRAM_BOT_TOKEN = "TU_TELEGRAM_BOT_TOKEN"
-TARGET_CHAT_ID = "7115547861"
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID", "7115547861")
 
 BITGET_CONFIG = {
-    'apiKey': 'TU_BITGET_API_KEY',
-    'secret': 'TU_BITGET_SECRET_KEY',
-    'password': 'TU_BITGET_PASSPHRASE',
+    'apiKey': os.getenv("BITGET_API_KEY"),
+    'secret': os.getenv("BITGET_SECRET_KEY"),
+    'password': os.getenv("BITGET_PASSPHRASE"),
     'enableRateLimit': True,
 }
 
@@ -339,9 +340,6 @@ if __name__ == '__main__':
     app.add_handler(CommandHandler('BITGET', cmd_bitget))
     app.add_handler(CommandHandler('operar', cmd_operar))
     app.add_handler(CommandHandler('analisis', cmd_analisis))
-    app.add_handler(CommandHandler('análisis', cmd_analisis))
-    app.add_handler(CallbackQueryHandler(handle_callback))
 
     print('Bot de Bitget iniciado correctamente...')
     app.run_polling()
-  
