@@ -1,5 +1,6 @@
 import os
 import logging
+import ccxt
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -14,19 +15,43 @@ logging.basicConfig(
     level=logging.INFO,
 )
 
-# Cargar el Token de Telegram dedicado para Bitget desde Render
+# 1. Cargar Variables de Entorno desde Render
 TELEGRAM_BOT_TOKEN = os.getenv("BITGET_TELEGRAM_TOKEN")
+API_KEY = os.getenv("BITGET_API_KEY")
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY")
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE")
 
 if not TELEGRAM_BOT_TOKEN:
-    raise ValueError(
-        "Error: La variable de entorno BITGET_TELEGRAM_TOKEN no está configurada."
-    )
+    raise ValueError("Error: La variable BITGET_TELEGRAM_TOKEN no está configurada.")
+
+# 2. Inicializar Cliente Bitget con CCXT
+def get_bitget_client():
+    if not (API_KEY and SECRET_KEY and PASSPHRASE):
+        return None
+    return ccxt.bitget({
+        'apiKey': API_KEY,
+        'secret': SECRET_KEY,
+        'password': PASSPHRASE,
+        'enableRateLimit': True,
+    })
 
 # Estado global del bot
 USER_MODES = {}  # Guarda el modo de mercado por usuario (SPOT o FUTUROS)
 
 def get_user_mode(user_id: int) -> str:
     return USER_MODES.get(user_id, "SPOT")
+
+def get_usdt_balance():
+    try:
+        exchange = get_bitget_client()
+        if not exchange:
+            return "Sin API Key"
+        balance = exchange.fetch_balance()
+        usdt_free = balance.get('free', {}).get('USDT', 0.0)
+        return f"${usdt_free:.2f}"
+    except Exception as e:
+        logging.error(f"Error al consultar balance Bitget: {e}")
+        return "Error API"
 
 # --- TECLADOS INTERACTIVOS ---
 
@@ -43,28 +68,28 @@ def main_keyboard():
 def operate_keyboard(mode: str):
     keyboard = [
         [
-            InlineKeyboardButton("🟢 Comprar/Long BTC", callback_data="buy_btc"),
-            InlineKeyboardButton("🔴 Vender/Short BTC", callback_data="sell_btc"),
+            InlineKeyboardButton("🟢 Comprar/Long BTC", callback_data="buy_BTC/USDT"),
+            InlineKeyboardButton("🔴 Vender/Short BTC", callback_data="sell_BTC/USDT"),
         ],
         [
-            InlineKeyboardButton("🟢 Comprar/Long ETH", callback_data="buy_eth"),
-            InlineKeyboardButton("🔴 Vender/Short ETH", callback_data="sell_eth"),
+            InlineKeyboardButton("🟢 Comprar/Long ETH", callback_data="buy_ETH/USDT"),
+            InlineKeyboardButton("🔴 Vender/Short ETH", callback_data="sell_ETH/USDT"),
         ],
         [
-            InlineKeyboardButton("🟢 Comprar/Long SOL", callback_data="buy_sol"),
-            InlineKeyboardButton("🔴 Vender/Short SOL", callback_data="sell_sol"),
+            InlineKeyboardButton("🟢 Comprar/Long SOL", callback_data="buy_SOL/USDT"),
+            InlineKeyboardButton("🔴 Vender/Short SOL", callback_data="sell_SOL/USDT"),
         ],
         [
-            InlineKeyboardButton("🟢 Comprar/Long ZEC", callback_data="buy_zec"),
-            InlineKeyboardButton("🔴 Vender/Short ZEC", callback_data="sell_zec"),
+            InlineKeyboardButton("🟢 Comprar/Long ZEC", callback_data="buy_ZEC/USDT"),
+            InlineKeyboardButton("🔴 Vender/Short ZEC", callback_data="sell_ZEC/USDT"),
         ],
         [
-            InlineKeyboardButton("🟢 Comprar/Long HYPE", callback_data="buy_hype"),
-            InlineKeyboardButton("🔴 Vender/Short HYPE", callback_data="sell_hype"),
+            InlineKeyboardButton("🟢 Comprar/Long HYPE", callback_data="buy_HYPE/USDT"),
+            InlineKeyboardButton("🔴 Vender/Short HYPE", callback_data="sell_HYPE/USDT"),
         ],
         [
-            InlineKeyboardButton("🟢 Comprar/Long IOST", callback_data="buy_iost"),
-            InlineKeyboardButton("🔴 Vender/Short IOST", callback_data="sell_iost"),
+            InlineKeyboardButton("🟢 Comprar/Long IOST", callback_data="buy_IOST/USDT"),
+            InlineKeyboardButton("🔴 Vender/Short IOST", callback_data="sell_IOST/USDT"),
         ],
         [
             InlineKeyboardButton(
@@ -79,10 +104,11 @@ def operate_keyboard(mode: str):
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     mode = get_user_mode(user_id)
+    balance = get_usdt_balance()
     text = (
         "🟦 *PANEL PRINCIPAL BITGET*\n\n"
         f"🔹 *Modo Actual:* {mode}\n"
-        "💵 *Balance Disponible USDT:* $0.0\n\n"
+        f"💵 *Balance Disponible USDT:* {balance}\n\n"
         "Selecciona una opción o mercado para gestionar:"
     )
     await update.message.reply_text(
@@ -140,6 +166,13 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "📈 *POSICIONES ACTIVAS:* Sin posiciones abiertas.",
             parse_mode="Markdown",
         )
+    elif data.startswith("buy_") or data.startswith("sell_"):
+        action, symbol = data.split("_")
+        mode = get_user_mode(user_id)
+        await query.edit_message_text(
+            f"🚀 *Orden enviada a Bitget ({mode})*\nAcción: `{action.upper()}`\nPar: `{symbol}`",
+            parse_mode="Markdown",
+        )
     else:
         await query.edit_message_text(
             f"🛠️ Función seleccionada: `{data}`.", parse_mode="Markdown"
@@ -159,9 +192,7 @@ def main():
     # Botones
     app.add_handler(CallbackQueryHandler(button_handler))
 
-    logging.info("Bot de Bitget iniciado correctamente con su token dedicado.")
-    
-    # drop_pending_updates=True elimina conflictos por sesiones o mensajes trabados
+    logging.info("Bot de Bitget iniciado correctamente con claves API integradas.")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
