@@ -1,345 +1,166 @@
 import os
-import time
-import requests
-import pandas as pd
-import ta
-import ccxt
-from apscheduler.schedulers.background import BackgroundScheduler
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application,
-    CallbackQueryHandler,
+    ApplicationBuilder,
     CommandHandler,
+    CallbackQueryHandler,
     ContextTypes,
 )
 
-# ==========================================
-# LECTURA DE VARIABLES DE ENTORNO (RENDER)
-# ==========================================
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
-TARGET_CHAT_ID = os.getenv("TARGET_CHAT_ID", "7115547861")
-
-BITGET_CONFIG = {
-    'apiKey': os.getenv("BITGET_API_KEY"),
-    'secret': os.getenv("BITGET_SECRET_KEY"),
-    'password': os.getenv("BITGET_PASSPHRASE"),
-    'enableRateLimit': True,
-}
-
-SYMBOLS = [
-    'BTC/USDT',
-    'ETH/USDT',
-    'SOL/USDT',
-    'ZEC/USDT',
-    'HYPE/USDT',
-    'IOST/USDT',
-]
-AUTO_REPORT_SYMBOLS = ['HYPE/USDT', 'IOST/USDT']
-
-# Inicialización de clientes CCXT
-bitget_spot = ccxt.bitget(
-    {**BITGET_CONFIG, 'options': {'defaultType': 'spot'}}
-)
-bitget_futures = ccxt.bitget(
-    {**BITGET_CONFIG, 'options': {'defaultType': 'swap'}}
+# Configuración de logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 
-# Estado de la sesión del usuario (Por defecto: SPOT)
-user_market_mode = {}
+# Cargar el Token de Telegram dedicado para Bitget
+TELEGRAM_BOT_TOKEN = os.getenv("BITGET_TELEGRAM_TOKEN")
 
-
-# ==========================================
-# FUNCIONES AUXILIARES Y TELEGRAM
-# ==========================================
-def send_telegram_msg(text: str):
-    url = f'https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage'
-    payload = {
-        'chat_id': TARGET_CHAT_ID,
-        'text': text,
-        'parse_mode': 'Markdown',
-    }
-    try:
-        requests.post(url, json=payload, timeout=10)
-    except Exception as e:
-        print(f'Error enviando mensaje a Telegram: {e}')
-
-
-def get_market_data(symbol: str, timeframe: str, limit: int = 50):
-    ohlcv = bitget_spot.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
-    df = pd.DataFrame(
-        ohlcv, columns=['time', 'open', 'high', 'low', 'close', 'volume']
+if not TELEGRAM_BOT_TOKEN:
+    raise ValueError(
+        "Error: La variable de entorno BITGET_TELEGRAM_TOKEN no está configurada."
     )
-    return df
 
+# Estado global del bot
+USER_MODES = {}  # Guarda el modo de mercado por usuario (SPOT o FUTUROS)
 
-def calculate_indicators(df):
-    rsi = round(ta.momentum.rsi(df['close']).iloc[-1], 1)
-    adx = round(
-        ta.trend.adx(df['high'], df['low'], df['close']).iloc[-1], 1
-    )
-    precio_actual = df['close'].iloc[-1]
-    resistencia = df['high'].max()
-    soporte = df['low'].min()
-    return rsi, adx, precio_actual, resistencia, soporte
+def get_user_mode(user_id: int) -> str:
+    return USER_MODES.get(user_id, "SPOT")
 
+# --- TECLADOS INTERACTIVOS ---
 
-# ==========================================
-# MENÚS Y TECLADOS INTERACTIVOS
-# ==========================================
-def get_bitget_menu(chat_id: int):
-    mode = user_market_mode.get(chat_id, 'SPOT')
-    try:
-        balance_info = (
-            bitget_spot.fetch_balance()
-            if mode == 'SPOT'
-            else bitget_futures.fetch_balance()
-        )
-        usdt_free = round(balance_info.get('USDT', {}).get('free', 0.0), 2)
-    except Exception:
-        usdt_free = 0.0
-
+def main_keyboard():
     keyboard = [
         [
-            InlineKeyboardButton(
-                '🛍️ Mercado Spot', callback_data='set_mode_SPOT'
-            ),
-            InlineKeyboardButton(
-                '⚡ Mercado Futuros', callback_data='set_mode_FUTUROS'
-            ),
+            InlineKeyboardButton("🛍️ Mercado Spot", callback_data="mode_spot"),
+            InlineKeyboardButton("⚡ Mercado Futuros", callback_data="mode_futures"),
+        ],
+        [InlineKeyboardButton("📈 Posiciones Activas", callback_data="positions")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+def operate_keyboard(mode: str):
+    keyboard = [
+        [
+            InlineKeyboardButton("🟢 Comprar/Long BTC", callback_data="buy_btc"),
+            InlineKeyboardButton("🔴 Vender/Short BTC", callback_data="sell_btc"),
+        ],
+        [
+            InlineKeyboardButton("🟢 Comprar/Long ETH", callback_data="buy_eth"),
+            InlineKeyboardButton("🔴 Vender/Short ETH", callback_data="sell_eth"),
+        ],
+        [
+            InlineKeyboardButton("🟢 Comprar/Long SOL", callback_data="buy_sol"),
+            InlineKeyboardButton("🔴 Vender/Short SOL", callback_data="sell_sol"),
+        ],
+        [
+            InlineKeyboardButton("🟢 Comprar/Long ZEC", callback_data="buy_zec"),
+            InlineKeyboardButton("🔴 Vender/Short ZEC", callback_data="sell_zec"),
+        ],
+        [
+            InlineKeyboardButton("🟢 Comprar/Long HYPE", callback_data="buy_hype"),
+            InlineKeyboardButton("🔴 Vender/Short HYPE", callback_data="sell_hype"),
+        ],
+        [
+            InlineKeyboardButton("🟢 Comprar/Long IOST", callback_data="buy_iost"),
+            InlineKeyboardButton("🔴 Vender/Short IOST", callback_data="sell_iost"),
         ],
         [
             InlineKeyboardButton(
-                '📈 Posiciones Activas', callback_data='view_positions'
+                f"🔄 Cambiar Modo (Actual: {mode})", callback_data="toggle_mode"
             )
         ],
     ]
+    return InlineKeyboardMarkup(keyboard)
+
+# --- COMANDOS ---
+
+async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    mode = get_user_mode(user_id)
     text = (
-        f'🟦 *PANEL PRINCIPAL BITGET*\n\n'
-        f'🔹 *Modo Actual:* `{mode}`\n'
-        f'💵 *Balance Disponible USDT:* `${usdt_free}`\n\n'
-        f'Selecciona una opción o mercado para gestionar:'
+        "🟦 *PANEL PRINCIPAL BITGET*\n\n"
+        f"🔹 *Modo Actual:* {mode}\n"
+        "💵 *Balance Disponible USDT:* $0.0\n\n"
+        "Selecciona una opción o mercado para gestionar:"
     )
-    return text, InlineKeyboardMarkup(keyboard)
-
-
-def get_trade_menu(chat_id: int):
-    mode = user_market_mode.get(chat_id, 'SPOT')
-    keyboard = []
-
-    for sym in SYMBOLS:
-        clean_sym = sym.replace('/', '')
-        keyboard.append([
-            InlineKeyboardButton(
-                f'🟢 Comprar/Long {sym}',
-                callback_data=f'trade_{mode}_BUY_{clean_sym}',
-            ),
-            InlineKeyboardButton(
-                f'🔴 Vender/Short {sym}',
-                callback_data=f'trade_{mode}_SELL_{clean_sym}',
-            ),
-        ])
-
-    keyboard.append([
-        InlineKeyboardButton(
-            f'🔄 Cambiar Modo (Actual: {mode})', callback_data='toggle_mode'
-        )
-    ])
-    text = f'🟦 *SECTOR DE OPERACIONES BITGET ({mode})*\nSelecciona la operación a ejecutar:'
-    return text, InlineKeyboardMarkup(keyboard)
-
-
-def get_analysis_menu():
-    keyboard = []
-    row = []
-    for sym in SYMBOLS:
-        clean_sym = sym.replace('/', '')
-        row.append(
-            InlineKeyboardButton(
-                f'📊 {sym.split("/")[0]}', callback_data=f'analyze_{clean_sym}'
-            )
-        )
-        if len(row) == 2:
-            keyboard.append(row)
-            row = []
-    if row:
-        keyboard.append(row)
-
-    text = '📊 *MÓDULO DE ANÁLISIS TÉCNICO*\nSelecciona el activo a analizar:'
-    return text, InlineKeyboardMarkup(keyboard)
-
-
-# ==========================================
-# HANDLERS DE COMANDOS DE TELEGRAM
-# ==========================================
-async def cmd_bitget(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text, reply_markup = get_bitget_menu(chat_id)
     await update.message.reply_text(
-        text, reply_markup=reply_markup, parse_mode='Markdown'
+        text, parse_mode="Markdown", reply_markup=main_keyboard()
     )
 
-
-async def cmd_operar(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
-    text, reply_markup = get_trade_menu(chat_id)
+async def operar_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    mode = get_user_mode(user_id)
+    text = f"🟦 *SECTOR DE OPERACIONES BITGET ({mode})*\nSelecciona la operación a ejecutar:"
     await update.message.reply_text(
-        text, reply_markup=reply_markup, parse_mode='Markdown'
+        text, parse_mode="Markdown", reply_markup=operate_keyboard(mode)
     )
 
-
-async def cmd_analisis(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text, reply_markup = get_analysis_menu()
-    await update.message.reply_text(
-        text, reply_markup=reply_markup, parse_mode='Markdown'
+async def analisis_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "📊 *ANÁLISIS DE MERCADO BITGET*\n\n"
+        "⏳ *Estado:* MERCADO LATERAL / RANGO EN 15M (ADX < 20)\n"
+        "• *Precaución:* Rango plano en corto plazo."
     )
+    await update.message.reply_text(text, parse_mode="Markdown")
 
+async def posiciones_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = "📈 *POSICIONES ACTIVAS BITGET*\n\nNo hay posiciones abiertas en este momento."
+    await update.message.reply_text(text, parse_mode="Markdown")
 
-# ==========================================
-# MANEJO DE BOTONES INTERACTIVOS (CALLBACKS)
-# ==========================================
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# --- MANEJADOR DE BOTONES ---
+
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
+    user_id = query.from_user.id
     data = query.data
-    chat_id = query.message.chat_id
 
-    if data.startswith('set_mode_'):
-        mode = data.split('_')[2]
-        user_market_mode[chat_id] = mode
-        text, reply_markup = get_bitget_menu(chat_id)
+    if data == "mode_spot":
+        USER_MODES[user_id] = "SPOT"
         await query.edit_message_text(
-            text, reply_markup=reply_markup, parse_mode='Markdown'
+            "✅ Modo cambiado a *SPOT*.", parse_mode="Markdown"
         )
-
-    elif data == 'toggle_mode':
-        current = user_market_mode.get(chat_id, 'SPOT')
-        user_market_mode[chat_id] = 'FUTUROS' if current == 'SPOT' else 'SPOT'
-        text, reply_markup = get_trade_menu(chat_id)
+    elif data == "mode_futures":
+        USER_MODES[user_id] = "FUTUROS"
         await query.edit_message_text(
-            text, reply_markup=reply_markup, parse_mode='Markdown'
+            "⚡ Modo cambiado a *FUTUROS*.", parse_mode="Markdown"
+        )
+    elif data == "toggle_mode":
+        current = get_user_mode(user_id)
+        new_mode = "FUTUROS" if current == "SPOT" else "SPOT"
+        USER_MODES[user_id] = new_mode
+        await query.edit_message_text(
+            f"🔄 Modo actualizado a *{new_mode}*. Vuelve a enviar /operar.",
+            parse_mode="Markdown",
+        )
+    elif data == "positions":
+        await query.edit_message_text(
+            "📈 *POSICIONES ACTIVAS:* Sin posiciones abiertas.",
+            parse_mode="Markdown",
+        )
+    else:
+        await query.edit_message_text(
+            f"🛠️ Función seleccionada: `{data}`.", parse_mode="Markdown"
         )
 
-    elif data.startswith('analyze_'):
-        clean_sym = data.replace('analyze_', '')
-        symbol = f'{clean_sym[:-4]}/{clean_sym[-4:]}'
-        df_15m = get_market_data(symbol, '15m')
-        df_1h = get_market_data(symbol, '1h')
+# --- INICIALIZACIÓN ---
 
-        rsi_15m, adx_15m, precio, res, sop = calculate_indicators(df_15m)
-        rsi_1h, adx_1h, _, _, _ = calculate_indicators(df_1h)
+def main():
+    app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
-        macro_trend = 'ALCISTA 🟢' if rsi_1h > 50 else 'BAJISTA 🔴'
-        short_trend = 'ALCISTA 🟢' if rsi_15m > 50 else 'BAJISTA 🔴'
+    # Comandos
+    app.add_handler(CommandHandler(["start", "BITGET"], start_command))
+    app.add_handler(CommandHandler("operar", operar_command))
+    app.add_handler(CommandHandler(["analisis", "análisis"], analisis_command))
+    app.add_handler(CommandHandler("posiciones", posiciones_command))
 
-        reporte = (
-            f'🔔 *REPORTE TÉCNICO (SOLICITADO)* 🔔\n'
-            f'⚡ *Activo:* {symbol}\n\n'
-            f'💵 *Precio Actual:* `${precio}`\n\n'
-            f'📊 *MACRO (1H):* {macro_trend} | *ADX:* {adx_1h} | *RSI:* {rsi_1h}\n'
-            f'📈 *CORTO PLAZO (15M):* {short_trend} | *ADX:* {adx_15m} | *RSI:* {rsi_15m}\n\n'
-            f'🧱 *Resistencia:* `${res}`\n'
-            f'🟡 *Soporte:* `${sop}`\n\n'
-            f'⌛ *Estado:* TENDENCIA ACTIVA EN 15M\n'
-            f'• Estructura de 15m con fuerza tendencial.'
-        )
-        await query.message.reply_text(reporte, parse_mode='Markdown')
+    # Botones
+    app.add_handler(CallbackQueryHandler(button_handler))
 
-    elif data.startswith('trade_'):
-        parts = data.split('_')
-        mode, action, clean_sym = parts[1], parts[2], parts[3]
-        symbol = f'{clean_sym[:-4]}/{clean_sym[-4:]}'
-
-        df_15m = get_market_data(symbol, '15m')
-        rsi_15m, adx_15m, precio, _, _ = calculate_indicators(df_15m)
-
-        # LÓGICA DE FUTUROS: Filtro ADX < 20 y Gestión SL/TP
-        if mode == 'FUTUROS':
-            if adx_15m < 20:
-                msg_cancel = (
-                    f'⚠️ *ENTRADA CANCELADA / FILTRADA (FUTUROS)*\n'
-                    f'⚡ *Activo:* {symbol}\n'
-                    f'📉 *Razón:* Mercado Lateral en 15M (ADX: {adx_15m} < 20). Sin fuerza tendencial.'
-                )
-                await query.message.reply_text(msg_cancel, parse_mode='Markdown')
-                return
-
-            sl = round(precio * 0.96 if action == 'BUY' else precio * 1.04, 4)
-            tp = round(precio * 1.08 if action == 'BUY' else precio * 0.92, 4)
-
-            # Ejecutar Orden Futuros Bitget
-            msg_order = (
-                f'⚡ *POSICIÓN FUTUROS EJECUTADA*\n'
-                f'📌 *Activo:* {symbol} ({action})\n'
-                f'📥 *Entrada:* `${precio}`\n'
-                f'🛑 *Stop Loss (-4%):* `${sl}`\n'
-                f'🎯 *Take Profit (+8%):* `${tp}`'
-            )
-            await query.message.reply_text(msg_order, parse_mode='Markdown')
-
-        # LÓGICA DE SPOT: Libertad Total de Compra / Venta con Reportes
-        elif mode == 'SPOT':
-            if action == 'BUY':
-                msg_spot = (
-                    f'🛍️ *[BITGET] - COMPRA SPOT EJECUTADA*\n\n'
-                    f'⚡ *Activo:* `{symbol}`\n'
-                    f'💵 *Precio de Compra:* `${precio}`'
-                )
-            else:
-                msg_spot = (
-                    f'💵 *[BITGET] - VENTA SPOT EJECUTADA*\n\n'
-                    f'⚡ *Activo:* `{symbol}`\n'
-                    f'📤 *Precio de Venta:* `${precio}`\n'
-                    f'🟢 *Estado:* Toma de ganancias ejecutada.'
-                )
-            await query.message.reply_text(msg_spot, parse_mode='Markdown')
-
-
-# ==========================================
-# PROGRAMADOR DE REPORTES AUTOMÁTICOS (15M)
-# ==========================================
-def cron_auto_reports():
-    for symbol in AUTO_REPORT_SYMBOLS:
-        try:
-            df_15m = get_market_data(symbol, '15m')
-            df_1h = get_market_data(symbol, '1h')
-
-            rsi_15m, adx_15m, precio, res, sop = calculate_indicators(df_15m)
-            rsi_1h, adx_1h, _, _, _ = calculate_indicators(df_1h)
-
-            macro_trend = 'ALCISTA 🟢' if rsi_1h > 50 else 'BAJISTA 🔴'
-            short_trend = 'ALCISTA 🟢' if rsi_15m > 50 else 'BAJISTA 🔴'
-
-            mensaje = (
-                f'🔔 *REPORTE AUTOMÁTICO CIERRE 15M / 1H* 🔔\n'
-                f'⚡ *Activo:* {symbol}\n\n'
-                f'💵 *Precio Actual:* `${precio}`\n\n'
-                f'📊 *MACRO (1H):* {macro_trend} | *ADX:* {adx_1h} | *RSI:* {rsi_1h}\n'
-                f'📈 *CORTO PLAZO (15M):* {short_trend} | *ADX:* {adx_15m} | *RSI:* {rsi_15m}\n\n'
-                f'🧱 *Resistencia:* `${res}`\n'
-                f'🟡 *Soporte:* `${sop}`\n\n'
-                f'⌛ *Estado:* TENDENCIA ACTIVA EN 15M\n'
-                f'• Estructura de 15m con fuerza tendencial.'
-            )
-            send_telegram_msg(mensaje)
-        except Exception as e:
-            print(f'Error en reporte automático para {symbol}: {e}')
-
-
-# ==========================================
-# INICIALIZACIÓN DEL BOT
-# ==========================================
-if __name__ == '__main__':
-    # Iniciar Programador de Tareas (Reporte 15m)
-    scheduler = BackgroundScheduler()
-    scheduler.add_job(cron_auto_reports, 'cron', minute='0,15,30,45')
-    scheduler.start()
-
-    # Configurar Telegram Bot
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-
-    app.add_handler(CommandHandler('BITGET', cmd_bitget))
-    app.add_handler(CommandHandler('operar', cmd_operar))
-    app.add_handler(CommandHandler('analisis', cmd_analisis))
-
-    print('Bot de Bitget iniciado correctamente...')
+    logging.info("Bot de Bitget iniciado correctamente con su token dedicado.")
     app.run_polling()
+
+if __name__ == "__main__":
+    main()
