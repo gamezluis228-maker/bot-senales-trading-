@@ -297,7 +297,7 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
             position_side = 'LONG' if side == 'buy' else 'SHORT'
             try:
                 exchange.set_leverage(5, market_symbol, {'side': position_side, 'marginCoin': 'USDT'})
-            except:
+            except Exception:
                 pass
         else:
             market_symbol = f"{symbol}/USDT"
@@ -471,7 +471,6 @@ def bucle_alertas_15m():
     time.sleep(5)
     
     while True:
-        # 1. Alertas para BingX (BTC y ZEC)
         for coin in ["BTC", "ZEC"]:
             try:
                 market_symbol = f"{coin}/USDT:USDT"
@@ -488,7 +487,6 @@ def bucle_alertas_15m():
             
             time.sleep(2)
 
-        # 2. Alerta independiente para PNT (Biconomy)
         try:
             analisis_pnt = obtener_analisis_pnt()
             if analisis_pnt and analisis_pnt.get("timestamp_15m"):
@@ -509,4 +507,4 @@ def enviar_reporte_automatico(coin):
             f"⚡ Activo: {coin}/USDT\n\n"
             f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
             f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-            f"📈 **CORTO PLA
+            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['r
