@@ -220,7 +220,8 @@ def obtener_analisis_pnt():
         print(f"Error consultando Biconomy para PNT: {e}")
         return None
 
-@bot.message_handler(commands=['pnt'])
+# Acepta tanto /pnt como /ptn por si hay error de tipeo
+@bot.message_handler(commands=['pnt', 'ptn'])
 def comando_pnt(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -509,6 +510,4 @@ def bucle_alertas_15m():
 
 def enviar_reporte_automatico(coin):
     try:
-        analisis = obtener_analisis_tecnico(coin)
-        reporte = (
-            f"🔔 **REPORTE AUTOM
+        analisis = obtener_analisis_tec
