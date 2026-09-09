@@ -160,10 +160,6 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# =====================================================================
-# --- BLOQUE SEPARADO EXCLUSIVO PARA PNT EN BICONOMY (API PÚBLICA) ---
-# =====================================================================
-
 def obtener_analisis_pnt():
     try:
         url_1h = "https://api.biconomy.com/api/v1/klines?symbol=PNT_USDT&type=1h&size=30"
@@ -220,7 +216,6 @@ def obtener_analisis_pnt():
         print(f"Error consultando Biconomy para PNT: {e}")
         return None
 
-# Acepta tanto /pnt como /ptn por si hay error de tipeo
 @bot.message_handler(commands=['pnt', 'ptn'])
 def comando_pnt(message):
     global ULTIMO_CHAT_ID
@@ -271,8 +266,6 @@ def enviar_reporte_pnt_automatico(analisis):
             bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
         print(f"No se pudo enviar la alerta automática de PNT: {e}")
-
-# =====================================================================
 
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
@@ -510,4 +503,10 @@ def bucle_alertas_15m():
 
 def enviar_reporte_automatico(coin):
     try:
-        analisis = obtener_analisis_tec
+        analisis = obtener_analisis_tecnico(coin)
+        reporte = (
+            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
+            f"⚡ Activo: {coin}/USDT\n\n"
+            f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
+            f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
+            f"📈 **CORTO PLA
