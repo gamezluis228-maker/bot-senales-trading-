@@ -23,7 +23,8 @@ ULTIMO_CHAT_ID = 7115547861
 # Diccionario para controlar el último timestamp por moneda
 ultimos_timestamps = {
     "BTC": 0,
-    "ZEC": 0
+    "ZEC": 0,
+    "PNT": 0
 }
 
 # Lista para registrar las operaciones activas y monitorear su cierre
@@ -159,6 +160,119 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
+# =====================================================================
+# --- BLOQUE SEPARADO EXCLUSIVO PARA PNT EN BICONOMY (API PÚBLICA) ---
+# =====================================================================
+
+def obtener_analisis_pnt():
+    try:
+        url_1h = "https://api.biconomy.com/api/v1/klines?symbol=PNT_USDT&type=1h&size=30"
+        res_1h = requests.get(url_1h, timeout=10).json()
+        data_1h = res_1h.get('data', [])
+        
+        closes_1h = [float(x[4]) for x in data_1h]
+        highs_1h = [float(x[2]) for x in data_1h]
+        lows_1h = [float(x[3]) for x in data_1h]
+        
+        precio_actual = closes_1h[-1]
+        rsi_1h = calcular_rsi(closes_1h)
+        adx_1h = calcular_adx(highs_1h, lows_1h, closes_1h)
+        resistencia_1h = max(highs_1h[-10:])
+        soporte_1h = min(lows_1h[-10:])
+        tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
+
+        url_15m = "https://api.biconomy.com/api/v1/klines?symbol=PNT_USDT&type=15m&size=30"
+        res_15m = requests.get(url_15m, timeout=10).json()
+        data_15m = res_15m.get('data', [])
+        
+        closes_15m = [float(x[4]) for x in data_15m]
+        highs_15m = [float(x[2]) for x in data_15m]
+        lows_15m = [float(x[3]) for x in data_15m]
+        
+        rsi_15m = calcular_rsi(closes_15m)
+        adx_15m = calcular_adx(highs_15m, lows_15m, closes_15m)
+        tendencia_15m = "ALCISTA 🟢" if closes_15m[-1] > closes_15m[-10] else "BAJISTA 🔴"
+
+        if adx_15m > 20:
+            estado_mercado = "TENDENCIA ACTIVA EN 15M"
+            pausa_bot = "Estructura de 15m con fuerza tendencial."
+        else:
+            estado_mercado = "MERCADO LATERAL / RANGO EN 15M (ADX < 20)"
+            pausa_bot = "Precaución: Rango plano en corto plazo."
+
+        last_time = int(data_15m[-2][0]) if len(data_15m) >= 2 else 0
+
+        return {
+            "precio": precio_actual,
+            "tendencia_1h": tendencia_1h,
+            "adx_1h": round(adx_1h, 1),
+            "rsi_1h": round(rsi_1h, 1),
+            "tendencia_15m": tendencia_15m,
+            "adx_15m": round(adx_15m, 1),
+            "rsi_15m": round(rsi_15m, 1),
+            "resistencia": resistencia_1h,
+            "soporte": soporte_1h,
+            "estado": estado_mercado,
+            "pausa": pausa_bot,
+            "timestamp_15m": last_time
+        }
+    except Exception as e:
+        print(f"Error consultando Biconomy para PNT: {e}")
+        return None
+
+@bot.message_handler(commands=['pnt'])
+def comando_pnt(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    
+    bot.send_chat_action(message.chat.id, 'typing')
+    analisis = obtener_analisis_pnt()
+    
+    if analisis:
+        reporte = (
+            f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
+            f"💵 **Precio Actual:** ${analisis['precio']:.6f}\n\n"
+            f"📊 **ANÁLISIS MACRO (1H):**\n"
+            f"• Tendencia: {analisis['tendencia_1h']}\n"
+            f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
+            f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
+            f"• Tendencia: {analisis['tendencia_15m']}\n"
+            f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+            f"🧱 **Resistencia:** ${analisis['resistencia']:.6f}\n"
+            f"🟡 **Soporte:** ${analisis['soporte']:.6f}\n\n"
+            f"🎯 **SEÑAL:**\n"
+            f"⏳ **{analisis['estado']}**\n"
+            f"• {analisis['pausa']}"
+        )
+        bot.send_message(message.chat.id, reporte, parse_mode="Markdown")
+    else:
+        bot.send_message(message.chat.id, "❌ Error al obtener datos de PNT desde Biconomy.")
+
+def enviar_reporte_pnt_automatico(analisis):
+    try:
+        reporte = (
+            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
+            f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
+            f"💵 **Precio Actual:** ${analisis['precio']:.6f}\n\n"
+            f"📊 **ANÁLISIS MACRO (1H):**\n"
+            f"• Tendencia: {analisis['tendencia_1h']}\n"
+            f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
+            f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
+            f"• Tendencia: {analisis['tendencia_15m']}\n"
+            f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+            f"🧱 **Resistencia:** ${analisis['resistencia']:.6f}\n"
+            f"🟡 **Soporte:** ${analisis['soporte']:.6f}\n\n"
+            f"🎯 **SEÑAL:**\n"
+            f"⏳ **{analisis['estado']}**\n"
+            f"• {analisis['pausa']}"
+        )
+        if ULTIMO_CHAT_ID:
+            bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+    except Exception as e:
+        print(f"No se pudo enviar la alerta automática de PNT: {e}")
+
+# =====================================================================
+
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
@@ -173,13 +287,12 @@ def mostrar_menu_principal(message):
 
     bot.send_message(
         message.chat.id, 
-        "CRYPTO ANÁLISIS MULTITEMPORAL 🟢\n\n🤖 Selecciona una criptomoneda para ver 1H y 15M:\n*(Alertas automáticas de 15m para BTC y ZEC activas)*", 
+        "CRYPTO ANÁLISIS MULTITEMPORAL 🟢\n\n🤖 Selecciona una criptomoneda para ver 1H y 15M:\n*(Alertas automáticas de 15m para BTC, ZEC y PNT activas)*\n\n💡 Usa /pnt para ver el análisis de PNT (Biconomy)", 
         reply_markup=markup
     )
 
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
-        # Aseguramos que las credenciales estén inyectadas antes de operar
         exchange.apiKey = os.getenv("BINGX_API_KEY")
         exchange.secret = os.getenv("BINGX_SECRET_KEY")
 
@@ -364,6 +477,7 @@ def bucle_alertas_15m():
     time.sleep(5)
     
     while True:
+        # 1. Alertas para BingX (BTC y ZEC)
         for coin in ["BTC", "ZEC"]:
             try:
                 market_symbol = f"{coin}/USDT:USDT"
@@ -379,53 +493,22 @@ def bucle_alertas_15m():
                 print(f"Error comprobando vela 15M para {coin}: {e}")
             
             time.sleep(2)
-        
+
+        # 2. Alerta independiente para PNT (Biconomy)
+        try:
+            analisis_pnt = obtener_analisis_pnt()
+            if analisis_pnt and analisis_pnt.get("timestamp_15m"):
+                ts_pnt = analisis_pnt["timestamp_15m"]
+                if ts_pnt > ultimos_timestamps["PNT"]:
+                    ultimos_timestamps["PNT"] = ts_pnt
+                    enviar_reporte_pnt_automatico(analisis_pnt)
+        except Exception as e:
+            print(f"Error comprobando vela 15M para PNT: {e}")
+
         time.sleep(30)
 
 def enviar_reporte_automatico(coin):
     try:
         analisis = obtener_analisis_tecnico(coin)
         reporte = (
-            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
-            f"⚡ Activo: {coin}/USDT\n\n"
-            f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
-            f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-            f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
-            f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
-            f"⏳ Estado: {analisis['estado']}\n"
-            f"• {analisis['pausa']}"
-        )
-        if ULTIMO_CHAT_ID:
-            bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
-    except Exception as e:
-        print(f"No se pudo enviar la alerta automática de {coin}: {e}")
-
-def arrancar_bot_telegram():
-    while True:
-        try:
-            bot.remove_webhook()
-            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"Error crítico en polling de Telegram: {e}")
-            time.sleep(10)
-
-if __name__ == "__main__":
-    hilo_bot = threading.Thread(target=arrancar_bot_telegram)
-    hilo_bot.daemon = True
-    hilo_bot.start()
-
-    hilo_alertas = threading.Thread(target=bucle_alertas_15m)
-    hilo_alertas.daemon = True
-    hilo_alertas.start()
-
-    hilo_monitoreo = threading.Thread(target=bucle_monitoreo_posiciones)
-    hilo_monitoreo.daemon = True
-    hilo_monitoreo.start()
-
-    hilo_ping = threading.Thread(target=bucle_keep_alive)
-    hilo_ping.daemon = True
-    hilo_ping.start()
-
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+            f"🔔 **REPORTE AUTOM
