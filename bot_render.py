@@ -291,18 +291,17 @@ def mostrar_menu_principal(message):
 
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
-        # Usar la instancia dedicada con las credenciales explícitas de Render
         ex = crear_instancia_exchange(mercado)
 
         if mercado == 'swap':
-            market_symbol = f"{symbol}/USDT:USDT"
+            market_symbol = symbol + "/USDT:USDT"
             position_side = 'LONG' if side == 'buy' else 'SHORT'
             try:
                 ex.set_leverage(5, market_symbol, {'side': position_side, 'marginCoin': 'USDT'})
             except Exception:
                 pass
         else:
-            market_symbol = f"{symbol}/USDT"
+            market_symbol = symbol + "/USDT"
             position_side = None
 
         ticker = ex.fetch_ticker(market_symbol)
@@ -312,11 +311,11 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
         params = {}
         if mercado == 'swap':
             if side == 'buy':
-                stop_loss_price = precio_actual * (1 - 0.04)
-                take_profit_price = precio_actual * (1 + 0.08)
+                stop_loss_price = precio_actual * 0.96
+                take_profit_price = precio_actual * 1.08
             else:
-                stop_loss_price = precio_actual * (1 + 0.04)
-                take_profit_price = precio_actual * (1 - 0.08)
+                stop_loss_price = precio_actual * 1.04
+                take_profit_price = precio_actual * 0.92
             
             params['stopLossPrice'] = ex.price_to_precision(market_symbol, stop_loss_price)
             params['takeProfitPrice'] = ex.price_to_precision(market_symbol, take_profit_price)
@@ -472,7 +471,7 @@ def bucle_alertas_15m():
     while True:
         for coin in ["BTC", "ZEC"]:
             try:
-                market_symbol = f"{coin}/USDT:USDT"
+                market_symbol = coin + "/USDT:USDT"
                 ohlcv_15m = exchange.fetch_ohlcv(market_symbol, timeframe='15m', limit=3)
                 
                 if ohlcv_15m and len(ohlcv_15m) >= 2:
@@ -507,4 +506,6 @@ def enviar_reporte_automatico(coin):
             f"💵 **Precio Actual:** ${analisis['precio']:,.2f}\n\n"
             f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
             f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-            f"🧱 **Resistencia:** ${an
+            f"🧱 **Resistencia:** ${analisis['resistencia']:,.2f}\n"
+            f"🟡 **Soporte:** ${analisis['soporte']:,.2f}\n\n"
+         
