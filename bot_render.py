@@ -551,4 +551,17 @@ if __name__ == "__main__":
     t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
     t_posiciones.start()
 
-    t_alertas = threading.Thread(target=bucle_alertas_15m, d
+    t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
+    t_alertas.start()
+
+    print("Iniciando servidor Flask y Bot de Telegram...")
+    
+    import threading
+    def correr_flask():
+        app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+    
+    t_flask = threading.Thread(target=correr_flask, daemon=True)
+    t_flask.start()
+
+    iniciar_bot()
+    
