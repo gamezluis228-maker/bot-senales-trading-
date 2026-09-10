@@ -230,43 +230,49 @@ def comando_pnt(message):
     analisis = obtener_analisis_pnt()
     
     if analisis:
-        reporte = (
-            f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
-            f"💵 **Precio Actual:** ${analisis['precio']:.6f}\n\n"
-            f"📊 **ANÁLISIS MACRO (1H):**\n"
-            f"• Tendencia: {analisis['tendencia_1h']}\n"
-            f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
-            f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
-            f"• Tendencia: {analisis['tendencia_15m']}\n"
-            f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-            f"🧱 **Resistencia:** ${analisis['resistencia']:.6f}\n"
-            f"🟡 **Soporte:** ${analisis['soporte']:.6f}\n\n"
-            f"🎯 **SEÑAL:**\n"
-            f"⏳ **{analisis['estado']}**\n"
-            f"• {analisis['pausa']}"
-        )
+        reporte = f"""⚡ **SPOT BICONOMY: PNT/USDT**
+
+💵 **Precio Actual:** ${analisis['precio']:.6f}
+
+📊 **ANÁLISIS MACRO (1H):**
+• Tendencia: {analisis['tendencia_1h']}
+• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
+
+📈 **ESTRUCTURA CORTO PLAZO (15M):**
+• Tendencia: {analisis['tendencia_15m']}
+• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
+
+🧱 **Resistencia:** ${analisis['resistencia']:.6f}
+🟡 **Soporte:** ${analisis['soporte']:.6f}
+
+🎯 **SEÑAL:**
+⏳ **{analisis['estado']}**
+• {analisis['pausa']}"""
         bot.send_message(message.chat.id, reporte, parse_mode="Markdown")
     else:
         bot.send_message(message.chat.id, "❌ Error al obtener datos de PNT desde Biconomy.")
 
 def enviar_reporte_pnt_automatico(analisis):
     try:
-        reporte = (
-            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
-            f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
-            f"💵 **Precio Actual:** ${analisis['precio']:.6f}\n\n"
-            f"📊 **ANÁLISIS MACRO (1H):**\n"
-            f"• Tendencia: {analisis['tendencia_1h']}\n"
-            f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
-            f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
-            f"• Tendencia: {analisis['tendencia_15m']}\n"
-            f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-            f"🧱 **Resistencia:** ${analisis['resistencia']:.6f}\n"
-            f"🟡 **Soporte:** ${analisis['soporte']:.6f}\n\n"
-            f"🎯 **SEÑAL:**\n"
-            f"⏳ **{analisis['estado']}**\n"
-            f"• {analisis['pausa']}"
-        )
+        reporte = f"""🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔
+⚡ **SPOT BICONOMY: PNT/USDT**
+
+💵 **Precio Actual:** ${analisis['precio']:.6f}
+
+📊 **ANÁLISIS MACRO (1H):**
+• Tendencia: {analisis['tendencia_1h']}
+• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
+
+📈 **ESTRUCTURA CORTO PLAZO (15M):**
+• Tendencia: {analisis['tendencia_15m']}
+• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
+
+🧱 **Resistencia:** ${analisis['resistencia']:.6f}
+🟡 **Soporte:** ${analisis['soporte']:.6f}
+
+🎯 **SEÑAL:**
+⏳ **{analisis['estado']}**
+• {analisis['pausa']}"""
         if ULTIMO_CHAT_ID:
             bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
@@ -361,22 +367,26 @@ def callback_query(call):
             
             analisis = obtener_analisis_tecnico(coin)
 
-            reporte = (
-                f"⚡ FUTUROS BINGX: {coin}/USDT\n\n"
-                f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
-                f"📊 **ANÁLISIS MACRO (1H):**\n"
-                f"• Tendencia: {analisis['tendencia_1h']}\n"
-                f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
-                f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
-                f"• Tendencia: {analisis['tendencia_15m']}\n"
-                f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-                f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
-                f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
-                f"🎯 SEÑAL:\n"
-                f"⏳ {analisis['estado']}\n"
-                f"• {analisis['pausa']}\n\n"
-                f"⚙️ **Selecciona margen y tipo de operación para {coin}:**"
-            )
+            reporte = f"""⚡ FUTUROS BINGX: {coin}/USDT
+
+💵 Precio Actual: ${analisis['precio']:,.2f}
+
+📊 **ANÁLISIS MACRO (1H):**
+• Tendencia: {analisis['tendencia_1h']}
+• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
+
+📈 **ESTRUCTURA CORTO PLAZO (15M):**
+• Tendencia: {analisis['tendencia_15m']}
+• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
+
+🧱 Resistencia: ${analisis['resistencia']:,.2f}
+🟡 Soporte: ${analisis['soporte']:,.2f}
+
+🎯 SEÑAL:
+⏳ {analisis['estado']}
+• {analisis['pausa']}
+
+⚙️ **Selecciona margen y tipo de operación para {coin}:**"""
 
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
@@ -501,11 +511,40 @@ def bucle_alertas_15m():
 def enviar_reporte_automatico(coin):
     try:
         analisis = obtener_analisis_tecnico(coin)
-        reporte = (
-            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
-            f"⚡ **Activo:** {coin}/USDT\n\n"
-            f"💵 **Precio Actual:** ${analisis['precio']:,.2f}\n\n"
-            f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-            f"🧱 **Resistencia:** ${analisis['resistencia']:,.2f}\n"
-            f"🟡 
+        reporte = f"""🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔
+⚡ **Activo:** {coin}/USDT
+
+💵 **Precio Actual:** ${analisis['precio']:,.2f}
+
+📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
+📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
+
+🧱 **Resistencia:** ${analisis['resistencia']:,.2f}
+🟡 **Soporte:** ${analisis['soporte']:,.2f}
+
+🎯 **SEÑAL:**
+⏳ **{analisis['estado']}**
+• {analisis['pausa']}"""
+
+        if ULTIMO_CHAT_ID:
+            bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+    except Exception as e:
+        print(f"No se pudo enviar la alerta automática de {coin}: {e}")
+
+# --- INICIALIZACIÓN DE HILOS Y SERVIDOR ---
+if __name__ == "__main__":
+    t_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
+    t_keep_alive.start()
+
+    t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
+    t_posiciones.start()
+
+    t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
+    t_alertas.start()
+
+    t_telegram = threading.Thread(target=bot.infinity_polling, daemon=True)
+    t_telegram.start()
+
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
+    
