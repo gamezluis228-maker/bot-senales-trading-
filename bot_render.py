@@ -164,6 +164,7 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
+# --- ESTRUCTURA INDEPENDIENTE PARA PNT (BICONOMY) ---
 def obtener_analisis_pnt():
     try:
         url_1h = "https://api.biconomy.com/api/v1/klines?symbol=PNT_USDT&type=1h&size=30"
@@ -507,5 +508,4 @@ def enviar_reporte_automatico(coin):
             f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
             f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
             f"🧱 **Resistencia:** ${analisis['resistencia']:,.2f}\n"
-            f"🟡 **Soporte:** ${analisis['soporte']:,.2f}\n\n"
-         
+            f"🟡 
