@@ -539,6 +539,10 @@ def enviar_reporte_automatico(coin):
     except Exception as e:
         print(f"No se pudo enviar la alerta automática de {coin}: {e}")
 
+def iniciar_bot():
+    """Función separada para arrancar el polling de Telegram sin errores de sintaxis"""
+    bot.infinity_polling(skip_pending=True)
+
 # --- INICIALIZACIÓN DE HILOS Y SERVIDOR ---
 if __name__ == "__main__":
     t_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
@@ -547,8 +551,4 @@ if __name__ == "__main__":
     t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
     t_posiciones.start()
 
-    t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
-    t_alertas.start()
-
-    # skip_pending=True para evitar el error 409 de colisiones en Telegram
-    t_telegram = threading.Thread(target=l
+    t_alertas = threading.Thread(target=bucle_alertas_15m, d
