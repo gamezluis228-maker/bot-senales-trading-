@@ -40,7 +40,7 @@ def crear_instancia_exchange(mercado='swap'):
         'options': {'defaultType': mercado}
     })
 
-# Instancia global base
+# Instancia global base BingX
 exchange = crear_instancia_exchange('swap')
 
 try:
@@ -48,6 +48,18 @@ try:
     print("¡Mercados de BingX cargados correctamente!")
 except Exception as e:
     print(f"Error al cargar mercados de BingX: {e}")
+
+# Instancia global para Biconomy (Spot)
+ex_pnt = ccxt.biconomy({
+    'enableRateLimit': True,
+    'options': {'defaultType': 'spot'}
+})
+
+try:
+    ex_pnt.load_markets()
+    print("¡Mercados de Biconomy cargados correctamente!")
+except Exception as e:
+    print(f"Error al cargar mercados de Biconomy: {e}")
 
 @app.route('/')
 def home():
@@ -164,16 +176,15 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# --- ESTRUCTURA INDEPENDIENTE PARA PNT (BICONOMY) ---
+# --- ESTRUCTURA SPOT CON CCXT PARA PNT (BICONOMY) ---
 def obtener_analisis_pnt():
     try:
-        url_1h = "https://api.biconomy.com/api/v1/klines?symbol=PNT_USDT&type=1h&size=30"
-        res_1h = requests.get(url_1h, timeout=10).json()
-        data_1h = res_1h.get('data', [])
+        market_symbol = 'PNT/USDT'
         
-        closes_1h = [float(x[4]) for x in data_1h]
-        highs_1h = [float(x[2]) for x in data_1h]
-        lows_1h = [float(x[3]) for x in data_1h]
+        ohlcv_1h = ex_pnt.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
+        closes_1h = [x[4] for x in ohlcv_1h]
+        highs_1h = [x[2] for x in ohlcv_1h]
+        lows_1h = [x[3] for x in ohlcv_1h]
         
         precio_actual = closes_1h[-1]
         rsi_1h = calcular_rsi(closes_1h)
@@ -182,13 +193,10 @@ def obtener_analisis_pnt():
         soporte_1h = min(lows_1h[-10:])
         tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
 
-        url_15m = "https://api.biconomy.com/api/v1/klines?symbol=PNT_USDT&type=15m&size=30"
-        res_15m = requests.get(url_15m, timeout=10).json()
-        data_15m = res_15m.get('data', [])
-        
-        closes_15m = [float(x[4]) for x in data_15m]
-        highs_15m = [float(x[2]) for x in data_15m]
-        lows_15m = [float(x[3]) for x in data_15m]
+        ohlcv_15m = ex_pnt.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
+        closes_15m = [x[4] for x in ohlcv_15m]
+        highs_15m = [x[2] for x in ohlcv_15m]
+        lows_15m = [x[3] for x in ohlcv_15m]
         
         rsi_15m = calcular_rsi(closes_15m)
         adx_15m = calcular_adx(highs_15m, lows_15m, closes_15m)
@@ -201,7 +209,7 @@ def obtener_analisis_pnt():
             estado_mercado = "MERCADO LATERAL / RANGO EN 15M (ADX < 20)"
             pausa_bot = "Precaución: Rango plano en corto plazo."
 
-        last_time = int(data_15m[-2][0]) if len(data_15m) >= 2 else 0
+        last_time = int(ohlcv_15m[-2][0]) if len(ohlcv_15m) >= 2 else 0
 
         return {
             "precio": precio_actual,
@@ -218,7 +226,7 @@ def obtener_analisis_pnt():
             "timestamp_15m": last_time
         }
     except Exception as e:
-        print(f"Error consultando Biconomy para PNT: {e}")
+        print(f"Error consultando Biconomy vía CCXT para PNT: {e}")
         return None
 
 @bot.message_handler(commands=['pnt', 'ptn'])
@@ -542,9 +550,5 @@ if __name__ == "__main__":
     t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
     t_alertas.start()
 
-    t_telegram = threading.Thread(target=bot.infinity_polling, daemon=True)
-    t_telegram.start()
-
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
-    
+    # skip_pending=True para evitar el error 409 de colisiones en Telegram
+    t_telegram = threading.Thread(target=l
