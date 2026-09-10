@@ -167,7 +167,6 @@ def obtener_analisis_tecnico(symbol):
 # --- CONSULTA SPOT PARA PNT (BICONOMY / MERCADO GENERAL) ---
 def obtener_analisis_pnt():
     try:
-        # Corregido ID de pNetwork en API pública con respaldo de precio de tu imagen
         url = "https://api.coingecko.com/api/v3/simple/price?ids=pnetwork&vs_currencies=usdt&include_24hr_change=true"
         resp = requests.get(url, timeout=10)
         datos = resp.json()
@@ -190,7 +189,6 @@ def obtener_analisis_pnt():
         }
     except Exception as e:
         print(f"Error consultando PNT: {e}")
-        # Respaldo de seguridad para que nunca falle
         precio_actual = 0.503967
         return {
             "precio": precio_actual,
@@ -535,7 +533,8 @@ if __name__ == "__main__":
     print("Iniciando servidor Flask y Bot de Telegram...")
     
     def correr_flask():
-        app.run(host='0.0.0.0', port=5000, debug=False, use_reloader=False)
+        port = int(os.getenv("PORT", 5000))
+        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
     
     t_flask = threading.Thread(target=correr_flask, daemon=True)
     t_flask.start()
