@@ -164,46 +164,61 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# --- CONSULTA SPOT PARA PNT (BICONOMY / MERCADO GENERAL) ---
+# --- CONSULTA SPOT PARA PNT EN BICONOMY (CCXT) ---
 def obtener_analisis_pnt():
     try:
-        url = "https://api.coingecko.com/api/v3/simple/price?ids=pnetwork&vs_currencies=usdt&include_24hr_change=true"
-        resp = requests.get(url, timeout=10)
-        datos = resp.json()
+        ex_biconomy = ccxt.biconomy({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'spot'}
+        })
         
-        precio_actual = float(datos.get('pnetwork', {}).get('usdt', 0.503967))
+        market_symbol = "PNT/USDT"
         
+        ohlcv_1h = ex_biconomy.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
+        closes_1h = [x[4] for x in ohlcv_1h]
+        highs_1h = [x[2] for x in ohlcv_1h]
+        lows_1h = [x[3] for x in ohlcv_1h]
+        
+        precio_actual = closes_1h[-1]
+        rsi_1h = calcular_rsi(closes_1h)
+        adx_1h = calcular_adx(highs_1h, lows_1h, closes_1h)
+        resistencia_1h = max(highs_1h[-10:])
+        soporte_1h = min(lows_1h[-10:])
+        tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
+
+        ohlcv_15m = ex_biconomy.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
+        closes_15m = [x[4] for x in ohlcv_15m]
+        highs_15m = [x[2] for x in ohlcv_15m]
+        lows_15m = [x[3] for x in ohlcv_15m]
+        
+        rsi_15m = calcular_rsi(closes_15m)
+        adx_15m = calcular_adx(highs_15m, lows_15m, closes_15m)
+        tendencia_15m = "ALCISTA 🟢" if closes_15m[-1] > closes_15m[-10] else "BAJISTA 🔴"
+
+        if adx_15m > 20:
+            estado_mercado = "TENDENCIA ACTIVA EN SPOT"
+            pausa_bot = "Estructura de 15m con fuerza tendencial."
+        else:
+            estado_mercado = "MERCADO LATERAL / RANGO EN SPOT"
+            pausa_bot = "Precaución: Rango plano en corto plazo."
+
         return {
             "precio": precio_actual,
-            "tendencia_1h": "ALCISTA 🟢",
-            "adx_1h": 25.0,
-            "rsi_1h": 55.0,
-            "tendencia_15m": "ALCISTA 🟢",
-            "adx_15m": 22.0,
-            "rsi_15m": 52.0,
-            "resistencia": precio_actual * 1.05,
-            "soporte": precio_actual * 0.95,
-            "estado": "TENDENCIA ACTIVA EN SPOT",
-            "pausa": "Monitoreando liquidez en Biconomy Spot.",
-            "timestamp_15m": int(time.time() // 900)
+            "tendencia_1h": tendencia_1h,
+            "adx_1h": round(adx_1h, 1),
+            "rsi_1h": round(rsi_1h, 1),
+            "tendencia_15m": tendencia_15m,
+            "adx_15m": round(adx_15m, 1),
+            "rsi_15m": round(rsi_15m, 1),
+            "resistencia": resistencia_1h,
+            "soporte": soporte_1h,
+            "estado": estado_mercado,
+            "pausa": pausa_bot,
+            "timestamp_15m": ohlcv_15m[-1][0]
         }
     except Exception as e:
-        print(f"Error consultando PNT: {e}")
-        precio_actual = 0.503967
-        return {
-            "precio": precio_actual,
-            "tendencia_1h": "ALCISTA 🟢",
-            "adx_1h": 25.0,
-            "rsi_1h": 55.0,
-            "tendencia_15m": "ALCISTA 🟢",
-            "adx_15m": 22.0,
-            "rsi_15m": 52.0,
-            "resistencia": precio_actual * 1.05,
-            "soporte": precio_actual * 0.95,
-            "estado": "TENDENCIA ACTIVA EN SPOT",
-            "pausa": "Monitoreando liquidez en Biconomy Spot.",
-            "timestamp_15m": int(time.time() // 900)
-        }
+        print(f"Error detallado consultando PNT en Biconomy via CCXT: {e}")
+        return None
 
 @bot.message_handler(commands=['pnt', 'ptn'])
 def comando_pnt(message):
@@ -534,9 +549,4 @@ if __name__ == "__main__":
     
     def correr_flask():
         port = int(os.getenv("PORT", 5000))
-        app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
-    
-    t_flask = threading.Thread(target=correr_flask, daemon=True)
-    t_flask.start()
-
-    iniciar_bot()
+        app.run(host='0.0.0.0', port=por
