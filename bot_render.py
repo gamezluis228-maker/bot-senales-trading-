@@ -31,7 +31,7 @@ ultimos_timestamps = {
 posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
-# Configuración base del cliente CCXT
+# Configuración base del cliente CCXT para BingX
 exchange = ccxt.bingx({
     'apiKey': API_KEY,
     'secret': SECRET_KEY,
@@ -504,7 +504,7 @@ def enviar_reporte_automatico(coin):
         analisis = obtener_analisis_tecnico(coin)
         reporte = (
             f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
-            f"⚡ Activo: {coin}/USDT\n\n"
-            f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
+            f"⚡ **Activo:** {coin}/USDT\n\n"
+            f"💵 **Precio Actual:** ${analisis['precio']:,.2f}\n\n"
             f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['r
+            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} 
