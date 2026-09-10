@@ -31,13 +31,17 @@ ultimos_timestamps = {
 posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
-# Configuración base del cliente CCXT para BingX
-exchange = ccxt.bingx({
-    'apiKey': API_KEY,
-    'secret': SECRET_KEY,
-    'enableRateLimit': True,
-    'options': {'defaultType': 'swap'}
-})
+def crear_instancia_exchange(mercado='swap'):
+    """Crea una instancia limpia de CCXT para BingX usando las variables de entorno"""
+    return ccxt.bingx({
+        'apiKey': API_KEY,
+        'secret': SECRET_KEY,
+        'enableRateLimit': True,
+        'options': {'defaultType': mercado}
+    })
+
+# Instancia global base
+exchange = crear_instancia_exchange('swap')
 
 try:
     exchange.load_markets()
@@ -287,24 +291,21 @@ def mostrar_menu_principal(message):
 
 def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
     try:
-        exchange.apiKey = os.getenv("BINGX_API_KEY")
-        exchange.secret = os.getenv("BINGX_SECRET_KEY")
+        # Usar la instancia dedicada con las credenciales explícitas de Render
+        ex = crear_instancia_exchange(mercado)
 
         if mercado == 'swap':
             market_symbol = f"{symbol}/USDT:USDT"
-            exchange.options['defaultType'] = 'swap'
-            
             position_side = 'LONG' if side == 'buy' else 'SHORT'
             try:
-                exchange.set_leverage(5, market_symbol, {'side': position_side, 'marginCoin': 'USDT'})
+                ex.set_leverage(5, market_symbol, {'side': position_side, 'marginCoin': 'USDT'})
             except Exception:
                 pass
         else:
             market_symbol = f"{symbol}/USDT"
-            exchange.options['defaultType'] = 'spot'
             position_side = None
 
-        ticker = exchange.fetch_ticker(market_symbol)
+        ticker = ex.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
         amount_tokens = margen_usdt / precio_actual
 
@@ -317,11 +318,11 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
                 stop_loss_price = precio_actual * (1 + 0.04)
                 take_profit_price = precio_actual * (1 - 0.08)
             
-            params['stopLossPrice'] = exchange.price_to_precision(market_symbol, stop_loss_price)
-            params['takeProfitPrice'] = exchange.price_to_precision(market_symbol, take_profit_price)
+            params['stopLossPrice'] = ex.price_to_precision(market_symbol, stop_loss_price)
+            params['takeProfitPrice'] = ex.price_to_precision(market_symbol, take_profit_price)
             params['positionSide'] = position_side
 
-        orden = exchange.create_order(
+        orden = ex.create_order(
             symbol=market_symbol,
             type='market',
             side=side,
@@ -429,12 +430,10 @@ def bucle_monitoreo_posiciones():
                 if not posiciones_activas:
                     continue
                 
-                exchange.apiKey = os.getenv("BINGX_API_KEY")
-                exchange.secret = os.getenv("BINGX_SECRET_KEY")
-                exchange.options['defaultType'] = 'swap'
+                ex_monitoreo = crear_instancia_exchange('swap')
                 
                 try:
-                    posiciones_abiertas_bingx = exchange.fetch_positions()
+                    posiciones_abiertas_bingx = ex_monitoreo.fetch_positions()
                 except Exception:
                     continue
 
@@ -507,4 +506,5 @@ def enviar_reporte_automatico(coin):
             f"⚡ **Activo:** {coin}/USDT\n\n"
             f"💵 **Precio Actual:** ${analisis['precio']:,.2f}\n\n"
             f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} 
+            f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+            f"🧱 **Resistencia:** ${an
