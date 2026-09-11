@@ -8,11 +8,13 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- VARIABLES DE ENTORNO DE BITGET ---
-TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_KEY = os.getenv("BITGET_API_KEY")
-SECRET_KEY = os.getenv("BITGET_SECRET_KEY")
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE")
+# --- CREDENCIALES Y CONFIGURACIÓN ---
+# Si prefieres usar variables de entorno de Render, déjalos con os.getenv. 
+# Si quieres asegurar que agarre las claves directo, sustituye el texto entre comillas por tus credenciales reales.
+TOKEN = os.getenv("TELEGRAM_TOKEN", "7115547861:AAG...") # O tu token directo
+API_KEY = os.getenv("BITGET_API_KEY", "tu_api_key_aquí")
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY", "tu_secret_key_aquí")
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE", "tu_passphrase_aquí")
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 bot = telebot.TeleBot(TOKEN)
