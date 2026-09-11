@@ -41,20 +41,22 @@ def crear_instancia_exchange(mercado='swap'):
         }
     })
 
+# Instancia global sin bloquear el arranque del script principal
 exchange = crear_instancia_exchange('swap')
 
-try:
-    exchange.load_markets()
-    print("¡Mercados de Bitget cargados correctamente!")
-except Exception as e:
-    print(f"Error al cargar mercados de Bitget: {e}")
+def inicializar_mercados():
+    try:
+        exchange.load_markets()
+        print("¡Mercados de Bitget cargados correctamente!")
+    except Exception as e:
+        print(f"Error al cargar mercados de Bitget: {e}")
 
 @app.route('/')
 def home():
     return "Bot Activo - Bitget (Mercado y Límite) + Biconomy"
 
 def bucle_keep_alive():
-    time.sleep(10)
+    time.sleep(15)
     while True:
         try:
             url = RENDER_APP_URL if RENDER_APP_URL else "http://127.0.0.1:5000/"
@@ -509,7 +511,4 @@ def bucle_alertas_15m():
             if tiempo_actual - ultimos_timestamps["PNT"] >= 900:
                 analisis_pnt = obtener_analisis_pnt()
                 if analisis_pnt:
-                    ultimos_timestamps["PNT"] = tiempo_actual
-                    enviar_reporte_pnt_automatico(analisis_pnt)
-        except Exception as e:
-            prin
+                    ultimos_timestamps["PNT"] = tiempo_actua
