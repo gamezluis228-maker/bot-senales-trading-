@@ -8,13 +8,11 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CREDENCIALES Y CONFIGURACIÓN ---
-# Si prefieres usar variables de entorno de Render, déjalos con os.getenv. 
-# Si quieres asegurar que agarre las claves directo, sustituye el texto entre comillas por tus credenciales reales.
-TOKEN = os.getenv("TELEGRAM_TOKEN", "7115547861:AAG...") # O tu token directo
-API_KEY = os.getenv("BITGET_API_KEY", "tu_api_key_aquí")
-SECRET_KEY = os.getenv("BITGET_SECRET_KEY", "tu_secret_key_aquí")
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE", "tu_passphrase_aquí")
+# --- CREDENCIALES Y CONFIGURACIÓN DE BITGET ---
+TOKEN = os.getenv("TELEGRAM_TOKEN", "7115547861:AAG...")
+API_KEY = os.getenv("BITGET_API_KEY", "")
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY", "")
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE", "")
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 bot = telebot.TeleBot(TOKEN)
@@ -305,20 +303,14 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Calculando temporalidades para {coin}...")
             analisis = obtener_analisis_tecnico(coin)
             reporte = (
-                f"⚡ FUTUROS BITGET: {coin}/USDT\n\n"
-                f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
-                f"📊 **ANÁLISIS MACRO (1H):**\n"
-                f"• Tendencia: {analisis['tendencia_1h']}\n"
-                f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
-                f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
-                f"• Tendencia: {analisis['tendencia_15m']}\n"
-                f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"⚡ **FUTUROS BITGET: {coin}/USDT**\n\n"
+                f"💵 Precio: ${analisis['precio']:,.2f}\n"
+                f"📊 **1H:** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
+                f"📈 **15M:** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n"
                 f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
                 f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
-                f"🎯 SEÑAL:\n"
-                f"⏳ {analisis['estado']}\n"
-                f"• {analisis['pausa']}\n\n"
-                f"⚙️ **Selecciona tipo de operación para {coin}:**"
+                f"🎯 **{analisis['estado']}**\n"
+                f"⚙️ **Selecciona operación:**"
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
             markup_opciones = InlineKeyboardMarkup(row_width=2)
