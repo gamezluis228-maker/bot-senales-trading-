@@ -41,7 +41,6 @@ def crear_instancia_exchange(mercado='swap'):
         }
     })
 
-# Instancia global sin bloquear el arranque del script principal
 exchange = crear_instancia_exchange('swap')
 
 def inicializar_mercados():
@@ -512,4 +511,4 @@ def bucle_alertas_15m():
                         ultimos_timestamps[coin] = candle_cerrada_time
                         enviar_reporte_automatico(coin)
             except Exception as e:
-    
+                print(f"Error comprobando vela 15M para {coin}: {e}")
