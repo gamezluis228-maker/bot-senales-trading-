@@ -58,7 +58,7 @@ def bucle_keep_alive():
     time.sleep(15)
     while True:
         try:
-            url = RENDER_APP_URL if RENDER_APP_URL else "http://127.0.0.1:5000/"
+            url = RENDER_APP_URL if RENDER_APP_URL else "http://127.0.0.1:10000/"
             requests.get(url, timeout=10)
             print("Keep-Alive: Ping enviado con éxito a la aplicación.")
         except Exception as e:
@@ -511,4 +511,4 @@ def bucle_alertas_15m():
                         ultimos_timestamps[coin] = candle_cerrada_time
                         enviar_reporte_automatico(coin)
             except Exception as e:
-                print(f"Error comprobando vela 15M para {coin}: {e}")
+                print(f"Error comprobando vela 15M para {coin}: {e}"
