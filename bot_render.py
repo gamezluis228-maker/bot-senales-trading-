@@ -8,7 +8,7 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- VARIABLES DE ENTORNO DE BITGET (NOMBRES EXACTOS) ---
+# --- VARIABLES DE ENTORNO DE BITGET ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("BITGET_API_KEY")
 SECRET_KEY = os.getenv("BITGET_SECRET_KEY")
@@ -18,22 +18,18 @@ RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# ID de Telegram configurado fijo para tus reportes
 ULTIMO_CHAT_ID = 7115547861
 
-# Diccionario para controlar el último timestamp por moneda
 ultimos_timestamps = {
     "BTC": 0,
     "ZEC": 0,
     "PNT": 0
 }
 
-# Lista para registrar las operaciones activas y monitorear su cierre
 posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
 def crear_instancia_exchange(mercado='swap'):
-    """Crea una instancia limpia de CCXT para Bitget usando las 3 credenciales"""
     return ccxt.bitget({
         'apiKey': API_KEY,
         'secret': SECRET_KEY,
@@ -42,7 +38,6 @@ def crear_instancia_exchange(mercado='swap'):
         'options': {'defaultType': mercado}
     })
 
-# Instancia global base Bitget
 exchange = crear_instancia_exchange('swap')
 
 try:
@@ -56,7 +51,6 @@ def home():
     return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre (Bitget)"
 
 def bucle_keep_alive():
-    """Hace una petición a la propia app en Render para no entrar en suspensión (Sleep)"""
     time.sleep(10)
     while True:
         try:
@@ -166,7 +160,6 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# --- CONSULTA SPOT PARA PNT EN BICONOMY ---
 def obtener_analisis_pnt():
     try:
         ex_biconomy = ccxt.biconomy({
@@ -535,10 +528,8 @@ def enviar_reporte_automatico(coin):
         print(f"No se pudo enviar la alerta automática de {coin}: {e}")
 
 def iniciar_bot():
-    """Función separada para arrancar el polling de Telegram sin errores de sintaxis"""
     bot.infinity_polling(skip_pending=True)
 
-# --- INICIALIZACIÓN DE HILOS Y SERVIDOR ---
 if __name__ == "__main__":
     t_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
     t_keep_alive.start()
@@ -547,4 +538,9 @@ if __name__ == "__main__":
     t_posiciones.start()
 
     t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
-    t_
+    t_alertas.start()
+
+    t_bot = threading.Thread(target=iniciar_bot, daemon=True)
+    t_bot.start()
+
+    app.run(host="0.0.0.0", port=5000)
