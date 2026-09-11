@@ -8,10 +8,11 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- VARIABLES DE ENTORNO EN RENDER ---
+# --- VARIABLES DE ENTORNO EN RENDER (ACTUALIZADAS A BITGET) ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
-API_KEY = os.getenv("BINGX_API_KEY")
-SECRET_KEY = os.getenv("BINGX_SECRET_KEY")
+API_KEY = os.getenv("BITGET_API_KEY")
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY")
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE")
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 bot = telebot.TeleBot(TOKEN)
@@ -32,26 +33,27 @@ posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
 def crear_instancia_exchange(mercado='swap'):
-    """Crea una instancia limpia de CCXT para BingX usando las variables de entorno"""
-    return ccxt.bingx({
+    """Crea una instancia limpia de CCXT para Bitget usando las 3 credenciales"""
+    return ccxt.bitget({
         'apiKey': API_KEY,
         'secret': SECRET_KEY,
+        'password': PASSPHRASE,  # CCXT utiliza 'password' para el Passphrase de Bitget
         'enableRateLimit': True,
         'options': {'defaultType': mercado}
     })
 
-# Instancia global base BingX
+# Instancia global base Bitget
 exchange = crear_instancia_exchange('swap')
 
 try:
     exchange.load_markets()
-    print("¡Mercados de BingX cargados correctamente!")
+    print("¡Mercados de Bitget cargados correctamente!")
 except Exception as e:
-    print(f"Error al cargar mercados de BingX: {e}")
+    print(f"Error al cargar mercados de Bitget: {e}")
 
 @app.route('/')
 def home():
-    return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre"
+    return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre (Bitget)"
 
 def bucle_keep_alive():
     """Hace una petición a la propia app en Render para no entrar en suspensión (Sleep)"""
@@ -164,20 +166,16 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# --- CONSULTA SPOT PARA PNT EN BICONOMY (CCXT CORREGIDA) ---
+# --- CONSULTA SPOT PARA PNT EN BICONOMY ---
 def obtener_analisis_pnt():
     try:
         ex_biconomy = ccxt.biconomy({
             'enableRateLimit': True,
             'options': {'defaultType': 'spot'}
         })
-        
-        # Carga obligatoria para que CCXT mapee bien los endpoints de Biconomy
         ex_biconomy.load_markets()
-        
         market_symbol = "PNT/USDT"
         
-        # Obtención del precio real exacto al segundo mediante el Ticker
         ticker = ex_biconomy.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
         
@@ -301,15 +299,15 @@ def mostrar_menu_principal(message):
         reply_markup=markup
     )
 
-def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
+def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt):
     try:
         ex = crear_instancia_exchange(mercado)
 
         if mercado == 'swap':
             market_symbol = symbol + "/USDT:USDT"
-            position_side = 'LONG' if side == 'buy' else 'SHORT'
+            position_side = 'long' if side == 'buy' else 'short'
             try:
-                ex.set_leverage(5, market_symbol, {'side': position_side, 'marginCoin': 'USDT'})
+                ex.set_leverage(5, market_symbol, {'marginCoin': 'USDT'})
             except Exception:
                 pass
         else:
@@ -331,7 +329,7 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
             
             params['stopLossPrice'] = ex.price_to_precision(market_symbol, stop_loss_price)
             params['takeProfitPrice'] = ex.price_to_precision(market_symbol, take_profit_price)
-            params['positionSide'] = position_side
+            params['tradeSide'] = position_side
 
         orden = ex.create_order(
             symbol=market_symbol,
@@ -345,7 +343,7 @@ def ejecutar_orden_bingx(symbol, mercado, side, margen_usdt):
             with bloqueo_posiciones:
                 posiciones_activas.append({
                     'symbol': market_symbol,
-                    'side': position_side,
+                    'side': position_side.upper(),
                     'chat_id': ULTIMO_CHAT_ID,
                     'tiempo': time.time()
                 })
@@ -372,7 +370,7 @@ def callback_query(call):
             
             analisis = obtener_analisis_tecnico(coin)
 
-            reporte = f"""⚡ FUTUROS BINGX: {coin}/USDT
+            reporte = f"""⚡ FUTUROS BITGET: {coin}/USDT
 
 💵 Precio Actual: ${analisis['precio']:,.2f}
 
@@ -414,12 +412,12 @@ def callback_query(call):
             margen = float(datos[4])
 
             bot.answer_callback_query(call.id, f"Procesando ${margen} USDT...")
-            exito, precio, resultado = ejecutar_orden_bingx(coin, mercado, side, margen)
+            exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen)
 
             if exito:
                 bot.send_message(
                     call.message.chat.id, 
-                    f"✅ **¡Operación Ejecutada con Éxito!**\n\n"
+                    f"✅ **¡Operación Ejecutada con Éxito en Bitget!**\n\n"
                     f"• Activo: {coin}/USDT\n"
                     f"• Mercado: {mercado.upper()}\n"
                     f"• Margen: ${margen} USDT\n"
@@ -428,7 +426,7 @@ def callback_query(call):
                     f"• Stop Loss: -4% 🛡️"
                 )
             else:
-                bot.send_message(call.message.chat.id, f"❌ Error en BingX:\n{resultado}")
+                bot.send_message(call.message.chat.id, f"❌ Error en Bitget:\n{resultado}")
 
         elif call.data == "radar_mercado":
             bot.answer_callback_query(call.id, "Radar activo")
@@ -448,12 +446,12 @@ def bucle_monitoreo_posiciones():
                 ex_monitoreo = crear_instancia_exchange('swap')
                 
                 try:
-                    posiciones_abiertas_bingx = ex_monitoreo.fetch_positions()
+                    posiciones_abiertas_bitget = ex_monitoreo.fetch_positions()
                 except Exception:
                     continue
 
                 simbolos_activos_en_exchange = set()
-                for pos in posiciones_abiertas_bingx:
+                for pos in posiciones_abiertas_bitget:
                     if float(pos.get('contracts', 0)) > 0:
                         simbolos_activos_en_exchange.add((pos['symbol'], pos.get('side', '').upper()))
 
@@ -466,7 +464,7 @@ def bucle_monitoreo_posiciones():
                         try:
                             bot.send_message(
                                 reg['chat_id'],
-                                f"🔔 **¡OPERACIÓN CERRADA EN BINGX!** 🔔\n\n"
+                                f"🔔 **¡OPERACIÓN CERRADA EN BITGET!** 🔔\n\n"
                                 f"• Activo: `{reg['symbol']}`\n"
                                 f"• Dirección: `{reg['side']}`\n"
                                 f"• Estado: La orden ha tocado su objetivo (Take Profit +8% o Stop Loss -4%). Revisa tu balance.",
@@ -546,4 +544,6 @@ if __name__ == "__main__":
     t_keep_alive.start()
 
     t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
-    t_posiciones.sta
+    t_posiciones.start()
+
+    t_alertas = 
