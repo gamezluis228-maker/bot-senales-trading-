@@ -11,7 +11,6 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # --- CREDENCIALES Y CONFIGURACIÓN CON DIAGNÓSTICO ---
 TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN")
 
-# Búsqueda ampliada de variables con todos los nombres posibles comunes
 API_KEY = (
     os.getenv("BITGET_API_KEY") 
     or os.getenv("API_KEY") 
@@ -37,13 +36,10 @@ PASSPHRASE = (
     or ""
 )
 
-# Imprimir diagnóstico en la consola para ver qué detectó el servidor
 print(f"--- DIAGNÓSTICO DE CREDENCIALES ---")
 print(f"API_KEY detectada: {'SÍ (Longitud: ' + str(len(API_KEY)) + ')' if API_KEY else 'NO (VACÍA)'}")
 print(f"SECRET_KEY detectada: {'SÍ (Longitud: ' + str(len(SECRET_KEY)) + ')' if SECRET_KEY else 'NO (VACÍA)'}")
 print(f"PASSPHRASE detectada: {'SÍ (Longitud: ' + str(len(PASSPHRASE)) + ')' if PASSPHRASE else 'NO (VACÍA)'}")
-if not API_KEY:
-    print("Variables de entorno disponibles en tu sistema:", list(os.environ.keys()))
 print("-------------------------------------")
 
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
@@ -457,8 +453,14 @@ def iniciar_bot_hilo():
     except Exception as e:
         print(f"Error hilos: {e}")
 
-    while type(True):
+    while True:
         try:
             bot.remove_webhook()
             print("🤖 Bot conectado y escuchando comandos de Telegram...")
-            bot.infin
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"⚠️ Polling detenido: {e}. Reiniciando...")
+            time.sleep(5)
+
+if __name__ == "__main__":
+    threading.Thread(target=inicia
