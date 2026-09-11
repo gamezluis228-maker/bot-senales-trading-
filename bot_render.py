@@ -166,7 +166,7 @@ def obtener_analisis_pnt():
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(url_alt, headers=headers, timeout=10)
         
-        precio_actual = 0.382649  # Precio real actual basado en la gráfica de Biconomy
+        precio_actual = 0.382649  
         
         if response.status_code == 200:
             data = response.json()
@@ -190,8 +190,7 @@ def obtener_analisis_pnt():
             "resistencia": resistencia_1h,
             "soporte": soporte_1h,
             "estado": "TENDENCIA BAJISTA EN SPOT",
-            "pausa": "Monitoreando PNT en Biconomy.",
-            "timestamp_15m": int(time.time())
+            "pausa": "Monitoreando PNT en Biconomy."
         }
     except Exception as e:
         print(f"Error detallado consultando PNT en Biconomy: {e}")
@@ -206,8 +205,7 @@ def obtener_analisis_pnt():
             "resistencia": 0.40,
             "soporte": 0.38,
             "estado": "SPOT BICONOMY ACTIVO",
-            "pausa": "Precio de respaldo sincronizado.",
-            "timestamp_15m": int(time.time())
+            "pausa": "Precio de respaldo sincronizado."
         }
 
 @bot.message_handler(commands=['pnt', 'ptn'])
@@ -485,15 +483,16 @@ def bucle_alertas_15m():
             
             time.sleep(2)
 
+        # Control estricto de 15 minutos exactos para PNT (900 segundos)
         try:
-            analisis_pnt = obtener_analisis_pnt()
-            if analisis_pnt and analisis_pnt.get("timestamp_15m"):
-                ts_pnt = analisis_pnt["timestamp_15m"]
-                if ts_pnt > ultimos_timestamps["PNT"]:
-                    ultimos_timestamps["PNT"] = ts_pnt
+            tiempo_actual = time.time()
+            if tiempo_actual - ultimos_timestamps["PNT"] >= 900:
+                analisis_pnt = obtener_analisis_pnt()
+                if analisis_pnt:
+                    ultimos_timestamps["PNT"] = tiempo_actual
                     enviar_reporte_pnt_automatico(analisis_pnt)
         except Exception as e:
-            print(f"Error comprobando vela 15M para PNT: {e}")
+            print(f"Error comprobando reporte 15M para PNT: {e}")
 
         time.sleep(30)
 
