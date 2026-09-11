@@ -324,7 +324,17 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
             params['takeProfitPrice'] = ex.price_to_precision(market_symbol, take_profit_price)
             params['tradeSide'] = position_side
 
-        if tipo_orden == 'limit':
+        if tipo_orden == 'market' and side == 'buy':
+            params['createMarketBuyOrderRequiresPrice'] = False
+            orden = ex.create_order(
+                symbol=market_symbol,
+                type='market',
+                side=side,
+                amount=amount_tokens,
+                price=precio_actual,
+                params=params
+            )
+        elif tipo_orden == 'limit':
             orden = ex.create_order(
                 symbol=market_symbol,
                 type='limit',
@@ -502,13 +512,4 @@ def bucle_alertas_15m():
                         ultimos_timestamps[coin] = candle_cerrada_time
                         enviar_reporte_automatico(coin)
             except Exception as e:
-                print(f"Error comprobando vela 15M para {coin}: {e}")
-            
-            time.sleep(2)
-
-        try:
-            tiempo_actual = time.time()
-            if tiempo_actual - ultimos_timestamps["PNT"] >= 900:
-                analisis_pnt = obtener_analisis_pnt()
-                if analisis_pnt:
-                    ultimos_timestamps["PNT"] = tiempo_actua
+    
