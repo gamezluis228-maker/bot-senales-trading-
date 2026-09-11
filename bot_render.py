@@ -8,13 +8,43 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CREDENCIALES Y CONFIGURACIÓN (Búsqueda robusta de variables) ---
+# --- CREDENCIALES Y CONFIGURACIÓN CON DIAGNÓSTICO ---
 TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN")
 
-# Busca tanto con prefijo como sin él para evitar que queden vacías
-API_KEY = os.getenv("BITGET_API_KEY") or os.getenv("API_KEY") or ""
-SECRET_KEY = os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("BITGET_SECRET") or ""
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE") or os.getenv("BITGET_PASSWORD") or ""
+# Búsqueda ampliada de variables con todos los nombres posibles comunes
+API_KEY = (
+    os.getenv("BITGET_API_KEY") 
+    or os.getenv("API_KEY") 
+    or os.getenv("BITGET_KEY") 
+    or os.getenv("KEY") 
+    or os.getenv("BITGET_PUBLIC_KEY") 
+    or ""
+)
+
+SECRET_KEY = (
+    os.getenv("BITGET_SECRET_KEY") 
+    or os.getenv("SECRET_KEY") 
+    or os.getenv("BITGET_SECRET") 
+    or os.getenv("SECRET") 
+    or ""
+)
+
+PASSPHRASE = (
+    os.getenv("BITGET_PASSPHRASE") 
+    or os.getenv("PASSPHRASE") 
+    or os.getenv("BITGET_PASSWORD") 
+    or os.getenv("PASSWORD") 
+    or ""
+)
+
+# Imprimir diagnóstico en la consola para ver qué detectó el servidor
+print(f"--- DIAGNÓSTICO DE CREDENCIALES ---")
+print(f"API_KEY detectada: {'SÍ (Longitud: ' + str(len(API_KEY)) + ')' if API_KEY else 'NO (VACÍA)'}")
+print(f"SECRET_KEY detectada: {'SÍ (Longitud: ' + str(len(SECRET_KEY)) + ')' if SECRET_KEY else 'NO (VACÍA)'}")
+print(f"PASSPHRASE detectada: {'SÍ (Longitud: ' + str(len(PASSPHRASE)) + ')' if PASSPHRASE else 'NO (VACÍA)'}")
+if not API_KEY:
+    print("Variables de entorno disponibles en tu sistema:", list(os.environ.keys()))
+print("-------------------------------------")
 
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
@@ -427,17 +457,8 @@ def iniciar_bot_hilo():
     except Exception as e:
         print(f"Error hilos: {e}")
 
-    while True:
+    while type(True):
         try:
             bot.remove_webhook()
             print("🤖 Bot conectado y escuchando comandos de Telegram...")
-            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"⚠️ Polling detenido: {e}. Reiniciando...")
-            time.sleep(5)
-
-if __name__ == "__main__":
-    threading.Thread(target=iniciar_bot_hilo, daemon=True).start()
-
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+            bot.infin
