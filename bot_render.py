@@ -8,11 +8,14 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CREDENCIALES Y CONFIGURACIÓN DE BITGET ---
-TOKEN = os.getenv("TELEGRAM_TOKEN", "7115547861:AAG...")
-API_KEY = os.getenv("BITGET_API_KEY", "")
-SECRET_KEY = os.getenv("BITGET_SECRET_KEY", "")
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE", "")
+# --- CREDENCIALES Y CONFIGURACIÓN (Búsqueda robusta de variables) ---
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN")
+
+# Busca tanto con prefijo como sin él para evitar que queden vacías
+API_KEY = os.getenv("BITGET_API_KEY") or os.getenv("API_KEY") or ""
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("BITGET_SECRET") or ""
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE") or os.getenv("BITGET_PASSWORD") or ""
+
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 bot = telebot.TeleBot(TOKEN)
@@ -30,16 +33,21 @@ posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
 def crear_instancia_exchange(mercado='swap'):
-    return ccxt.bitget({
-        'apiKey': API_KEY,
-        'secret': SECRET_KEY,
-        'password': PASSPHRASE,
+    config = {
         'enableRateLimit': True,
         'options': {
             'defaultType': mercado,
             'createMarketBuyOrderRequiresPrice': False
         }
-    })
+    }
+    if API_KEY:
+        config['apiKey'] = API_KEY
+    if SECRET_KEY:
+        config['secret'] = SECRET_KEY
+    if PASSPHRASE:
+        config['password'] = PASSPHRASE
+        
+    return ccxt.bitget(config)
 
 exchange = crear_instancia_exchange('swap')
 
