@@ -8,38 +8,17 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CREDENCIALES Y CONFIGURACIÓN CON DIAGNÓSTICO ---
-TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN")
+# --- CREDENCIALES ---
+TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN", "")
 
-API_KEY = (
-    os.getenv("BITGET_API_KEY") 
-    or os.getenv("API_KEY") 
-    or os.getenv("BITGET_KEY") 
-    or os.getenv("KEY") 
-    or os.getenv("BITGET_PUBLIC_KEY") 
-    or ""
-)
-
-SECRET_KEY = (
-    os.getenv("BITGET_SECRET_KEY") 
-    or os.getenv("SECRET_KEY") 
-    or os.getenv("BITGET_SECRET") 
-    or os.getenv("SECRET") 
-    or ""
-)
-
-PASSPHRASE = (
-    os.getenv("BITGET_PASSPHRASE") 
-    or os.getenv("PASSPHRASE") 
-    or os.getenv("BITGET_PASSWORD") 
-    or os.getenv("PASSWORD") 
-    or ""
-)
+API_KEY = os.getenv("BITGET_API_KEY") or os.getenv("API_KEY", "")
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY", "")
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE", "")
 
 print(f"--- DIAGNÓSTICO DE CREDENCIALES ---")
-print(f"API_KEY detectada: {'SÍ (Longitud: ' + str(len(API_KEY)) + ')' if API_KEY else 'NO (VACÍA)'}")
-print(f"SECRET_KEY detectada: {'SÍ (Longitud: ' + str(len(SECRET_KEY)) + ')' if SECRET_KEY else 'NO (VACÍA)'}")
-print(f"PASSPHRASE detectada: {'SÍ (Longitud: ' + str(len(PASSPHRASE)) + ')' if PASSPHRASE else 'NO (VACÍA)'}")
+print(f"API_KEY longitud: {len(API_KEY)}")
+print(f"SECRET_KEY longitud: {len(SECRET_KEY)}")
+print(f"PASSPHRASE longitud: {len(PASSPHRASE)}")
 print("-------------------------------------")
 
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
@@ -64,15 +43,11 @@ def crear_instancia_exchange(mercado='swap'):
         'options': {
             'defaultType': mercado,
             'createMarketBuyOrderRequiresPrice': False
-        }
+        },
+        'apiKey': API_KEY,
+        'secret': SECRET_KEY,
+        'password': PASSPHRASE
     }
-    if API_KEY:
-        config['apiKey'] = API_KEY
-    if SECRET_KEY:
-        config['secret'] = SECRET_KEY
-    if PASSPHRASE:
-        config['password'] = PASSPHRASE
-        
     return ccxt.bitget(config)
 
 exchange = crear_instancia_exchange('swap')
@@ -463,4 +438,7 @@ def iniciar_bot_hilo():
             time.sleep(5)
 
 if __name__ == "__main__":
-    threading.Thread(target=inicia
+    threading.Thread(target=iniciar_bot_hilo, daemon=True).start()
+
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
