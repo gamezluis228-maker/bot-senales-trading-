@@ -35,7 +35,10 @@ def crear_instancia_exchange(mercado='swap'):
         'secret': SECRET_KEY,
         'password': PASSPHRASE,
         'enableRateLimit': True,
-        'options': {'defaultType': mercado}
+        'options': {
+            'defaultType': mercado,
+            'createMarketBuyOrderRequiresPrice': False  # <--- Soluciona el error original de Bitget
+        }
     })
 
 exchange = crear_instancia_exchange('swap')
@@ -48,7 +51,7 @@ except Exception as e:
 
 @app.route('/')
 def home():
-    return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre (Bitget + Biconomy)"
+    return "Bot Activo - Bitget (Mercado y Límite) + Biconomy"
 
 def bucle_keep_alive():
     time.sleep(10)
@@ -283,7 +286,7 @@ def mostrar_menu_principal(message):
         reply_markup=markup
     )
 
-def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt):
+def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market', precio_personalizado=None):
     try:
         ex = crear_instancia_exchange(mercado)
 
@@ -300,28 +303,50 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt):
 
         ticker = ex.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
-        amount_tokens = margen_usdt / precio_actual
+
+        # Si es orden límite y se pasa precio personalizado, usamos el soporte/resistencia
+        precio_ejecucion = precio_personalizado if (tipo_orden == 'limit' and precio_personalizado) else precio_actual
+        amount_tokens = margen_usdt / precio_ejecucion
 
         params = {}
         if mercado == 'swap':
-            if side == 'buy':
-                stop_loss_price = precio_actual * 0.96
-                take_profit_price = precio_actual * 1.08
-            else:
-                stop_loss_price = precio_actual * 1.04
-                take_profit_price = precio_actual * 0.92
-            
+            if tipo_orden == 'market':
+                if side == 'buy':
+                    stop_loss_price = precio_actual * 0.96
+                    take_profit_price = precio_actual * 1.08
+                else:
+                    stop_loss_price = precio_actual * 1.04
+                    take_profit_price = precio_actual * 0.92
+            else: # Límite
+                if side == 'buy':
+                    stop_loss_price = precio_ejecucion * 0.96
+                    take_profit_price = precio_ejecucion * 1.08
+                else:
+                    stop_loss_price = precio_ejecucion * 1.04
+                    take_profit_price = precio_ejecucion * 0.92
+
             params['stopLossPrice'] = ex.price_to_precision(market_symbol, stop_loss_price)
             params['takeProfitPrice'] = ex.price_to_precision(market_symbol, take_profit_price)
             params['tradeSide'] = position_side
 
-        orden = ex.create_order(
-            symbol=market_symbol,
-            type='market',
-            side=side,
-            amount=amount_tokens,
-            params=params
-        )
+        # Envío de la orden a Bitget
+        if tipo_orden == 'limit':
+            orden = ex.create_order(
+                symbol=market_symbol,
+                type='limit',
+                side=side,
+                amount=amount_tokens,
+                price=ex.price_to_precision(market_symbol, precio_ejecucion),
+                params=params
+            )
+        else:
+            orden = ex.create_order(
+                symbol=market_symbol,
+                type='market',
+                side=side,
+                amount=amount_tokens,
+                params=params
+            )
 
         if mercado == 'swap':
             with bloqueo_posiciones:
@@ -332,7 +357,7 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt):
                     'tiempo': time.time()
                 })
 
-        return True, precio_actual, orden
+        return True, precio_ejecucion, orden
     except Exception as e:
         return False, 0, str(e)
 
@@ -373,39 +398,51 @@ def callback_query(call):
 ⏳ {analisis['estado']}
 • {analisis['pausa']}
 
-⚙️ **Selecciona margen y tipo de operación para {coin}:**"""
+⚙️ **Selecciona tipo de operación para {coin}:**"""
 
+            soporte = analisis['soporte']
+            resistencia = analisis['resistencia']
+
+            # Botones de Mercado y Límite organizados
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
-                InlineKeyboardButton("🟢 Abrir Long ($2)", callback_data=f"trade_{coin}_swap_buy_2"),
-                InlineKeyboardButton("🟢 Abrir Long ($5)", callback_data=f"trade_{coin}_swap_buy_5"),
-                InlineKeyboardButton("🟢 Abrir Long ($10)", callback_data=f"trade_{coin}_swap_buy_10"),
-                InlineKeyboardButton("🔴 Abrir Short ($2)", callback_data=f"trade_{coin}_swap_sell_2"),
-                InlineKeyboardButton("🔴 Abrir Short ($5)", callback_data=f"trade_{coin}_swap_sell_5"),
-                InlineKeyboardButton("🔴 Abrir Short ($10)", callback_data=f"trade_{coin}_swap_sell_10"),
-                InlineKeyboardButton("🟢 Spot ($5)", callback_data=f"trade_{coin}_spot_buy_5"),
-                InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10")
+                InlineKeyboardButton("🟢 Long Mercado ($2)", callback_data=f"trade_{coin}_swap_buy_2_market_0"),
+                InlineKeyboardButton("🟢 Long Mercado ($5)", callback_data=f"trade_{coin}_swap_buy_5_market_0"),
+                InlineKeyboardButton("🟢 Long Mercado ($10)", callback_data=f"trade_{coin}_swap_buy_10_market_0"),
+                InlineKeyboardButton("🔴 Short Mercado ($2)", callback_data=f"trade_{coin}_swap_sell_2_market_0"),
+                InlineKeyboardButton("🔴 Short Mercado ($5)", callback_data=f"trade_{coin}_swap_sell_5_market_0"),
+                InlineKeyboardButton("🔴 Short Mercado ($10)", callback_data=f"trade_{coin}_swap_sell_10_market_0"),
+                
+                # Nuevos botones de Límite con Soporte/Resistencia
+                InlineKeyboardButton("🎯 Long Límite (Soporte $5)", callback_data=f"trade_{coin}_swap_buy_5_limit_{soporte}"),
+                InlineKeyboardButton("🎯 Short Límite (Resist. $5)", callback_data=f"trade_{coin}_swap_sell_5_limit_{resistencia}"),
+                
+                InlineKeyboardButton("🟢 Spot ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
+                InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0")
             )
 
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
 
-        elif accion == "trade" and len(datos) >= 5:
+        elif accion == "trade" and len(datos) >= 7:
             coin = datos[1]
             mercado = datos[2]
             side = datos[3]
             margen = float(datos[4])
+            tipo_orden = datos[5]
+            precio_limite = float(datos[6])
 
-            bot.answer_callback_query(call.id, f"Procesando ${margen} USDT...")
-            exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen)
+            bot.answer_callback_query(call.id, f"Procesando orden {tipo_orden} (${margen})...")
+            exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen, tipo_orden, precio_limite)
 
             if exito:
+                tipo_txt = "LÍMITE (En objetivo)" if tipo_orden == 'limit' else "MERCADO"
                 bot.send_message(
                     call.message.chat.id, 
-                    f"✅ **¡Operación Ejecutada con Éxito en Bitget!**\n\n"
+                    f"✅ **¡Operación {tipo_txt} Ejecutada en Bitget!**\n\n"
                     f"• Activo: {coin}/USDT\n"
                     f"• Mercado: {mercado.upper()}\n"
                     f"• Margen: ${margen} USDT\n"
-                    f"• Entrada: ${precio:,.2f}\n"
+                    f"• Precio: ${precio:,.2f}\n"
                     f"• Take Profit: +8% 🎯\n"
                     f"• Stop Loss: -4% 🛡️"
                 )
@@ -451,7 +488,7 @@ def bucle_monitoreo_posiciones():
                                 f"🔔 **¡OPERACIÓN CERRADA EN BITGET!** 🔔\n\n"
                                 f"• Activo: `{reg['symbol']}`\n"
                                 f"• Dirección: `{reg['side']}`\n"
-                                f"• Estado: La orden ha tocado su objetivo (Take Profit +8% o Stop Loss -4%). Revisa tu balance.",
+                                f"• Estado: La orden ha finalizado (TP/SL alcanzado). Revisa tus ganancias o pérdidas en Bitget.",
                                 parse_mode="Markdown"
                             )
                         except Exception as ex:
@@ -504,37 +541,4 @@ def enviar_reporte_automatico(coin):
 💵 **Precio Actual:** ${analisis['precio']:,.2f}
 
 📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
-📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
-
-🧱 **Resistencia:** ${analisis['resistencia']:,.2f}
-🟡 **Soporte:** ${analisis['soporte']:,.2f}
-
-🎯 **SEÑAL:**
-⏳ **{analisis['estado']}**
-• {analisis['pausa']}"""
-
-        if ULTIMO_CHAT_ID:
-            bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
-    except Exception as e:
-        print(f"No se pudo enviar la alerta automática de {coin}: {e}")
-
-def iniciar_bot():
-    while True:
-        try:
-            bot.remove_webhook()  # Limpia webhooks fantasmas que bloquean los comandos
-            print("🤖 Bot conectado y escuchando comandos de Telegram...")
-            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"⚠️ El polling del bot se detuvo: {e}")
-            print("🔄 Reiniciando conexión con Telegram en 5 segundos...")
-            time.sleep(5)
-
-# --- INICIALIZACIÓN GLOBAL DE HILOS ---
-if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-    threading.Thread(target=bucle_keep_alive, daemon=True).start()
-    threading.Thread(target=bucle_monitoreo_posiciones, daemon=True).start()
-    threading.Thread(target=bucle_alertas_15m, daemon=True).start()
-    threading.Thread(target=iniciar_bot, daemon=True).start()
-
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+📈 **CORTO PLAZO (15M):** {
