@@ -164,7 +164,7 @@ def obtener_analisis_tecnico(symbol):
             "pausa": str(e)
         }
 
-# --- CONSULTA SPOT PARA PNT EN BICONOMY (CCXT) ---
+# --- CONSULTA SPOT PARA PNT EN BICONOMY (CCXT CORREGIDA) ---
 def obtener_analisis_pnt():
     try:
         ex_biconomy = ccxt.biconomy({
@@ -172,14 +172,20 @@ def obtener_analisis_pnt():
             'options': {'defaultType': 'spot'}
         })
         
+        # Carga obligatoria para que CCXT mapee bien los endpoints de Biconomy
+        ex_biconomy.load_markets()
+        
         market_symbol = "PNT/USDT"
+        
+        # Obtención del precio real exacto al segundo mediante el Ticker
+        ticker = ex_biconomy.fetch_ticker(market_symbol)
+        precio_actual = ticker['last']
         
         ohlcv_1h = ex_biconomy.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
         closes_1h = [x[4] for x in ohlcv_1h]
         highs_1h = [x[2] for x in ohlcv_1h]
         lows_1h = [x[3] for x in ohlcv_1h]
         
-        precio_actual = closes_1h[-1]
         rsi_1h = calcular_rsi(closes_1h)
         adx_1h = calcular_adx(highs_1h, lows_1h, closes_1h)
         resistencia_1h = max(highs_1h[-10:])
@@ -540,13 +546,4 @@ if __name__ == "__main__":
     t_keep_alive.start()
 
     t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
-    t_posiciones.start()
-
-    t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
-    t_alertas.start()
-
-    print("Iniciando servidor Flask y Bot de Telegram...")
-    
-    def correr_flask():
-        port = int(os.getenv("PORT", 5000))
-        app.run(host='0.0.0.0', port=por
+    t_posiciones.sta
