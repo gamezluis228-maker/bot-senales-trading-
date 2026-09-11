@@ -37,7 +37,7 @@ def crear_instancia_exchange(mercado='swap'):
         'enableRateLimit': True,
         'options': {
             'defaultType': mercado,
-            'createMarketBuyOrderRequiresPrice': False  # <--- Soluciona el error original de Bitget
+            'createMarketBuyOrderRequiresPrice': False
         }
     })
 
@@ -220,49 +220,43 @@ def comando_pnt(message):
     analisis = obtener_analisis_pnt()
     
     if analisis:
-        reporte = f"""⚡ **SPOT BICONOMY: PNT/USDT**
-
-💵 **Precio Actual:** ${analisis['precio']:.6f}
-
-📊 **ANÁLISIS MACRO (1H):**
-• Tendencia: {analisis['tendencia_1h']}
-• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
-
-📈 **ESTRUCTURA CORTO PLAZO (15M):**
-• Tendencia: {analisis['tendencia_15m']}
-• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
-
-🧱 **Resistencia:** ${analisis['resistencia']:.6f}
-🟡 **Soporte:** ${analisis['soporte']:.6f}
-
-🎯 **SEÑAL:**
-⏳ **{analisis['estado']}**
-• {analisis['pausa']}"""
+        reporte = (
+            f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
+            f"💵 **Precio Actual:** ${analisis['precio']:.6f}\n\n"
+            f"📊 **ANÁLISIS MACRO (1H):**\n"
+            f"• Tendencia: {analisis['tendencia_1h']}\n"
+            f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
+            f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
+            f"• Tendencia: {analisis['tendencia_15m']}\n"
+            f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+            f"🧱 **Resistencia:** ${analisis['resistencia']:.6f}\n"
+            f"🟡 **Soporte:** ${analisis['soporte']:.6f}\n\n"
+            f"🎯 **SEÑAL:**\n"
+            f"⏳ **{analisis['estado']}**\n"
+            f"• {analisis['pausa']}"
+        )
         bot.send_message(message.chat.id, reporte, parse_mode="Markdown")
     else:
         bot.send_message(message.chat.id, "❌ Error al obtener datos de PNT desde Biconomy.")
 
 def enviar_reporte_pnt_automatico(analisis):
     try:
-        reporte = f"""🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔
-⚡ **SPOT BICONOMY: PNT/USDT**
-
-💵 **Precio Actual:** ${analisis['precio']:.6f}
-
-📊 **ANÁLISIS MACRO (1H):**
-• Tendencia: {analisis['tendencia_1h']}
-• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
-
-📈 **ESTRUCTURA CORTO PLAZO (15M):**
-• Tendencia: {analisis['tendencia_15m']}
-• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
-
-🧱 **Resistencia:** ${analisis['resistencia']:.6f}
-🟡 **Soporte:** ${analisis['soporte']:.6f}
-
-🎯 **SEÑAL:**
-⏳ **{analisis['estado']}**
-• {analisis['pausa']}"""
+        reporte = (
+            f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
+            f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
+            f"💵 **Precio Actual:** ${analisis['precio']:.6f}\n\n"
+            f"📊 **ANÁLISIS MACRO (1H):**\n"
+            f"• Tendencia: {analisis['tendencia_1h']}\n"
+            f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
+            f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
+            f"• Tendencia: {analisis['tendencia_15m']}\n"
+            f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+            f"🧱 **Resistencia:** ${analisis['resistencia']:.6f}\n"
+            f"🟡 **Soporte:** ${analisis['soporte']:.6f}\n\n"
+            f"🎯 **SEÑAL:**\n"
+            f"⏳ **{analisis['estado']}**\n"
+            f"• {analisis['pausa']}"
+        )
         if ULTIMO_CHAT_ID:
             bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
     except Exception as e:
@@ -304,7 +298,6 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
         ticker = ex.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
 
-        # Si es orden límite y se pasa precio personalizado, usamos el soporte/resistencia
         precio_ejecucion = precio_personalizado if (tipo_orden == 'limit' and precio_personalizado) else precio_actual
         amount_tokens = margen_usdt / precio_ejecucion
 
@@ -317,7 +310,7 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
                 else:
                     stop_loss_price = precio_actual * 1.04
                     take_profit_price = precio_actual * 0.92
-            else: # Límite
+            else:
                 if side == 'buy':
                     stop_loss_price = precio_ejecucion * 0.96
                     take_profit_price = precio_ejecucion * 1.08
@@ -329,7 +322,6 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
             params['takeProfitPrice'] = ex.price_to_precision(market_symbol, take_profit_price)
             params['tradeSide'] = position_side
 
-        # Envío de la orden a Bitget
         if tipo_orden == 'limit':
             orden = ex.create_order(
                 symbol=market_symbol,
@@ -379,31 +371,26 @@ def callback_query(call):
             
             analisis = obtener_analisis_tecnico(coin)
 
-            reporte = f"""⚡ FUTUROS BITGET: {coin}/USDT
-
-💵 Precio Actual: ${analisis['precio']:,.2f}
-
-📊 **ANÁLISIS MACRO (1H):**
-• Tendencia: {analisis['tendencia_1h']}
-• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
-
-📈 **ESTRUCTURA CORTO PLAZO (15M):**
-• Tendencia: {analisis['tendencia_15m']}
-• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}
-
-🧱 Resistencia: ${analisis['resistencia']:,.2f}
-🟡 Soporte: ${analisis['soporte']:,.2f}
-
-🎯 SEÑAL:
-⏳ {analisis['estado']}
-• {analisis['pausa']}
-
-⚙️ **Selecciona tipo de operación para {coin}:**"""
+            reporte = (
+                f"⚡ FUTUROS BITGET: {coin}/USDT\n\n"
+                f"💵 Precio Actual: ${analisis['precio']:,.2f}\n\n"
+                f"📊 **ANÁLISIS MACRO (1H):**\n"
+                f"• Tendencia: {analisis['tendencia_1h']}\n"
+                f"• ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n\n"
+                f"📈 **ESTRUCTURA CORTO PLAZO (15M):**\n"
+                f"• Tendencia: {analisis['tendencia_15m']}\n"
+                f"• ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
+                f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
+                f"🎯 SEÑAL:\n"
+                f"⏳ {analisis['estado']}\n"
+                f"• {analisis['pausa']}\n\n"
+                f"⚙️ **Selecciona tipo de operación para {coin}:**"
+            )
 
             soporte = analisis['soporte']
             resistencia = analisis['resistencia']
 
-            # Botones de Mercado y Límite organizados
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🟢 Long Mercado ($2)", callback_data=f"trade_{coin}_swap_buy_2_market_0"),
@@ -412,11 +399,8 @@ def callback_query(call):
                 InlineKeyboardButton("🔴 Short Mercado ($2)", callback_data=f"trade_{coin}_swap_sell_2_market_0"),
                 InlineKeyboardButton("🔴 Short Mercado ($5)", callback_data=f"trade_{coin}_swap_sell_5_market_0"),
                 InlineKeyboardButton("🔴 Short Mercado ($10)", callback_data=f"trade_{coin}_swap_sell_10_market_0"),
-                
-                # Nuevos botones de Límite con Soporte/Resistencia
                 InlineKeyboardButton("🎯 Long Límite (Soporte $5)", callback_data=f"trade_{coin}_swap_buy_5_limit_{soporte}"),
                 InlineKeyboardButton("🎯 Short Límite (Resist. $5)", callback_data=f"trade_{coin}_swap_sell_5_limit_{resistencia}"),
-                
                 InlineKeyboardButton("🟢 Spot ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
                 InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0")
             )
@@ -528,17 +512,4 @@ def bucle_alertas_15m():
                     ultimos_timestamps["PNT"] = tiempo_actual
                     enviar_reporte_pnt_automatico(analisis_pnt)
         except Exception as e:
-            print(f"Error comprobando reporte 15M para PNT: {e}")
-
-        time.sleep(30)
-
-def enviar_reporte_automatico(coin):
-    try:
-        analisis = obtener_analisis_tecnico(coin)
-        reporte = f"""🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔
-⚡ **Activo:** {coin}/USDT
-
-💵 **Precio Actual:** ${analisis['precio']:,.2f}
-
-📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}
-📈 **CORTO PLAZO (15M):** {
+            prin
