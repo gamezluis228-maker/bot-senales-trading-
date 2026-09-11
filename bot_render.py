@@ -519,9 +519,17 @@ def enviar_reporte_automatico(coin):
         print(f"No se pudo enviar la alerta automática de {coin}: {e}")
 
 def iniciar_bot():
-    bot.infinity_polling(skip_pending=True)
+    while True:
+        try:
+            bot.remove_webhook()  # Limpia webhooks fantasmas que bloquean los comandos
+            print("🤖 Bot conectado y escuchando comandos de Telegram...")
+            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
+        except Exception as e:
+            print(f"⚠️ El polling del bot se detuvo: {e}")
+            print("🔄 Reiniciando conexión con Telegram en 5 segundos...")
+            time.sleep(5)
 
-# --- INICIALIZACIÓN GLOBAL DE HILOS (Para que corra tanto con python como con Gunicorn) ---
+# --- INICIALIZACIÓN GLOBAL DE HILOS ---
 if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
     threading.Thread(target=bucle_keep_alive, daemon=True).start()
     threading.Thread(target=bucle_monitoreo_posiciones, daemon=True).start()
