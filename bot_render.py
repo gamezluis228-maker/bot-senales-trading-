@@ -8,7 +8,7 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- VARIABLES DE ENTORNO EN RENDER (ACTUALIZADAS A BITGET) ---
+# --- VARIABLES DE ENTORNO DE BITGET (NOMBRES EXACTOS) ---
 TOKEN = os.getenv("TELEGRAM_TOKEN")
 API_KEY = os.getenv("BITGET_API_KEY")
 SECRET_KEY = os.getenv("BITGET_SECRET_KEY")
@@ -37,7 +37,7 @@ def crear_instancia_exchange(mercado='swap'):
     return ccxt.bitget({
         'apiKey': API_KEY,
         'secret': SECRET_KEY,
-        'password': PASSPHRASE,  # CCXT utiliza 'password' para el Passphrase de Bitget
+        'password': PASSPHRASE,
         'enableRateLimit': True,
         'options': {'defaultType': mercado}
     })
@@ -546,4 +546,5 @@ if __name__ == "__main__":
     t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
     t_posiciones.start()
 
-    t_alertas = 
+    t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
+    t_
