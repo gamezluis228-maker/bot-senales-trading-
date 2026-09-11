@@ -48,7 +48,7 @@ except Exception as e:
 
 @app.route('/')
 def home():
-    return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre (Bitget)"
+    return "Bot Activo - Multitemporal 1H y 15M con Alertas de Cierre (Bitget + Biconomy)"
 
 def bucle_keep_alive():
     time.sleep(10)
@@ -162,17 +162,13 @@ def obtener_analisis_tecnico(symbol):
 
 def obtener_analisis_pnt():
     try:
-        ex_biconomy = ccxt.biconomy({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'spot'}
-        })
-        ex_biconomy.load_markets()
-        market_symbol = "PNT/USDT"
+        ex_biconomy = ccxt.biconomy({'enableRateLimit': True})
+        ohlcv_1h = ex_biconomy.fetch_ohlcv("PNT/USDT", timeframe='1h', limit=30)
+        ohlcv_15m = ex_biconomy.fetch_ohlcv("PNT/USDT", timeframe='15m', limit=30)
+        ticker = ex_biconomy.fetch_ticker("PNT/USDT")
         
-        ticker = ex_biconomy.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
-        
-        ohlcv_1h = ex_biconomy.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
+
         closes_1h = [x[4] for x in ohlcv_1h]
         highs_1h = [x[2] for x in ohlcv_1h]
         lows_1h = [x[3] for x in ohlcv_1h]
@@ -183,7 +179,6 @@ def obtener_analisis_pnt():
         soporte_1h = min(lows_1h[-10:])
         tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
 
-        ohlcv_15m = ex_biconomy.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
         closes_15m = [x[4] for x in ohlcv_15m]
         highs_15m = [x[2] for x in ohlcv_15m]
         lows_15m = [x[3] for x in ohlcv_15m]
