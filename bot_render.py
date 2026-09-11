@@ -11,9 +11,9 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 # --- CREDENCIALES ---
 TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN", "")
 
-API_KEY = os.getenv("BITGET_API_KEY") or os.getenv("API_KEY", "")
-SECRET_KEY = os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY", "")
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE", "")
+API_KEY = os.getenv("BITGET_API_KEY") or os.getenv("API_KEY") or os.getenv("BITGET_KEY", "")
+SECRET_KEY = os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("BITGET_SECRET", "")
+PASSPHRASE = os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE") or os.getenv("BITGET_PASSWORD", "")
 
 print(f"--- DIAGNÓSTICO DE CREDENCIALES ---")
 print(f"API_KEY longitud: {len(API_KEY)}")
