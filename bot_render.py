@@ -483,7 +483,6 @@ def bucle_alertas_15m():
             
             time.sleep(2)
 
-        # Control estricto de 15 minutos exactos para PNT (900 segundos)
         try:
             tiempo_actual = time.time()
             if tiempo_actual - ultimos_timestamps["PNT"] >= 900:
@@ -522,17 +521,12 @@ def enviar_reporte_automatico(coin):
 def iniciar_bot():
     bot.infinity_polling(skip_pending=True)
 
+# --- INICIALIZACIÓN GLOBAL DE HILOS (Para que corra tanto con python como con Gunicorn) ---
+if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+    threading.Thread(target=bucle_keep_alive, daemon=True).start()
+    threading.Thread(target=bucle_monitoreo_posiciones, daemon=True).start()
+    threading.Thread(target=bucle_alertas_15m, daemon=True).start()
+    threading.Thread(target=iniciar_bot, daemon=True).start()
+
 if __name__ == "__main__":
-    t_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
-    t_keep_alive.start()
-
-    t_posiciones = threading.Thread(target=bucle_monitoreo_posiciones, daemon=True)
-    t_posiciones.start()
-
-    t_alertas = threading.Thread(target=bucle_alertas_15m, daemon=True)
-    t_alertas.start()
-
-    t_bot = threading.Thread(target=iniciar_bot, daemon=True)
-    t_bot.start()
-
     app.run(host="0.0.0.0", port=5000)
