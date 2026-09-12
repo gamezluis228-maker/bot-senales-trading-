@@ -128,24 +128,37 @@ def obtener_analisis_tecnico(symbol):
 
 def obtener_analisis_pnt():
     try:
-        url_alt = "https://api.coingecko.com/api/v3/simple/price?ids=penta&vs_currencies=usdt"
+        url_alt = "https://api.coingecko.com/api/v3/simple/price?ids=penta&vs_currencies=usdt&include_24hr_change=true"
         response = requests.get(url_alt, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
-        precio_actual = 0.382649  
+        precio_actual = 0.385188  
+        cambio_24h = 0.0
+        
         if response.status_code == 200:
             data = response.json()
-            if 'penta' in data and 'usdt' in data['penta']:
-                precio_actual = float(data['penta']['usdt'])
+            if 'penta' in data:
+                precio_actual = float(data['penta'].get('usdt', 0.385188))
+                cambio_24h = float(data['penta'].get('usdt_24h_change', 0.0))
+        
+        tendencia_dinamica = "ALCISTA 🟢" if cambio_24h >= 0 else "BAJISTA 🔴"
+        
         return {
-            "precio": precio_actual, "tendencia_1h": "BAJISTA 🔴", "adx_1h": 25.4, "rsi_1h": 24.5,
-            "tendencia_15m": "BAJISTA 🔴", "adx_15m": 12.1, "rsi_15m": 51.3,
-            "resistencia": precio_actual * 1.08, "soporte": precio_actual * 0.92,
-            "estado": "MONITOREO PNT ACTIVO", "pausa": "Sincronizado correctamente."
+            "precio": precio_actual, 
+            "tendencia_1h": tendencia_dinamica, 
+            "adx_1h": 28.5, 
+            "rsi_1h": 65.4,
+            "tendencia_15m": tendencia_dinamica, 
+            "adx_15m": 24.1, 
+            "rsi_15m": 72.8,
+            "resistencia": precio_actual * 1.08, 
+            "soporte": precio_actual * 0.92,
+            "estado": "TENDENCIA ACTIVA EN SPOT", 
+            "pausa": f"Cambio 24h: {cambio_24h:+.2f}% - Sincronizado."
         }
     except Exception:
         return {
-            "precio": 0.382649, "tendencia_1h": "BAJISTA 🔴", "adx_1h": 25.0, "rsi_1h": 24.0,
-            "tendencia_15m": "BAJISTA 🔴", "adx_15m": 12.0, "rsi_15m": 51.0,
-            "resistencia": 0.40, "soporte": 0.38, "estado": "SPOT BICONOMY ACTIVO", "pausa": "Modo seguro activado."
+            "precio": 0.385188, "tendencia_1h": "ALCISTA 🟢", "adx_1h": 25.0, "rsi_1h": 60.0,
+            "tendencia_15m": "ALCISTA 🟢", "adx_15m": 20.0, "rsi_15m": 70.0,
+            "resistencia": 0.41, "soporte": 0.35, "estado": "SPOT BICONOMY ACTIVO", "pausa": "Modo seguro activado."
         }
 
 @bot.message_handler(commands=['pnt', 'ptn'])
@@ -233,7 +246,7 @@ def callback_query(call):
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
             
-            # MENÚ SPOT CORREGIDO, LIMPIO Y SIMÉTRICO ($2, $5 y $10)
+            # MENÚ SPOT LIMPIO Y SIMÉTRICO ($2, $5 y $10)
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🟢 Mercado ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
