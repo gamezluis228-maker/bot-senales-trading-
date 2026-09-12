@@ -173,27 +173,32 @@ def bucle_reportes_automaticos():
                         if coin == "PNT":
                             analisis = obtener_analisis_pnt()
                             reporte = (
-                                f"🔔 REPORTE AUTOMÁTICO CIERRE 15M / 1H 🔔\n"
-                                f"🌐 Activo: PNT/USDT (Biconomy)\n\n"
+                                "🔔 REPORTE AUTOMÁTICO CIERRE 15M / 1H 🔔\n"
+                                "🌐 Activo: PNT/USDT (Biconomy)\n\n"
                                 f"💵 Precio Actual: ${analisis['precio']:.6f}\n\n"
                                 f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
                                 f"📈 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
                                 f"🧱 Resistencia: ${analisis['resistencia']:.6f}\n"
                                 f"🟡 Soporte: ${analisis['soporte']:.6f}\n\n"
-                                f"🎯 SEÑAL:\n• {analisis['estado']}\n• {analisis['pausa']}"
+                                "🎯 SEÑAL:\n"
+                                f"• {analisis['estado']}\n"
+                                f"• {analisis['pausa']}"
                             )
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, reporte)
                         else:
                             analisis = obtener_analisis_bitget(coin, 'swap')
                             reporte = (
-                                f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
+                                "🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
                                 f"⚡ **Activo:** {coin}/USDT\n\n"
                                 f"💵 **Precio Actual:** ${analisis['precio']:,.2f}\n\n"
                                 f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
                                 f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-                                f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
-                                f"🎯 **SEÑAL:**\n• {analisis['estado']}\n• {analisis['pausa']}"
+                                f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
+                                f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
+                                "🎯 **SEÑAL:**\n"
+                                f"• {analisis['estado']}\n"
+                                f"• {analisis['pausa']}"
                             )
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
@@ -209,12 +214,14 @@ def comando_pnt(message):
     bot.send_chat_action(message.chat.id, 'typing')
     analisis = obtener_analisis_pnt()
     reporte = (
-        f"🌐 BICONOMY (RED PÚBLICA): PNT/USDT\n\n"
+        "🌐 BICONOMY (RED PÚBLICA): PNT/USDT\n\n"
         f"💵 Precio Actual: ${analisis['precio']:.6f}\n\n"
         f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
         f"📈 15M: {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-        f"🧱 Resistencia: ${analisis['resistencia']:.6f}\n🟡 Soporte: ${analisis['soporte']:.6f}\n\n"
-        f"🎯 {analisis['estado']}\n• {analisis['pausa']}"
+        f"🧱 Resistencia: ${analisis['resistencia']:.6f}\n"
+        f"🟡 Soporte: ${analisis['soporte']:.6f}\n\n"
+        f"🎯 {analisis['estado']}\n"
+        f"• {analisis['pausa']}"
     )
     bot.send_message(message.chat.id, reporte)
 
@@ -293,7 +300,7 @@ def callback_query(call):
             if coin == "PNT":
                 analisis = obtener_analisis_pnt()
                 reporte = (
-                    f"🌐 BICONOMY (RED PÚBLICA): PNT/USDT\n\n"
+                    "🌐 BICONOMY (RED PÚBLICA): PNT/USDT\n\n"
                     f"💵 Precio: ${analisis['precio']:.6f}\n"
                     f"📊 1H: {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
                     f"📈 15M: {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n"
@@ -348,12 +355,13 @@ def callback_query(call):
                 InlineKeyboardButton("🔴 Resistencia ($5)", callback_data=f"trade_{mercado_tipo}_{coin}_sell_5_limit_{resistencia}"),
                 InlineKeyboardButton("🔴 Resistencia ($10)", callback_data=f"trade_{mercado_tipo}_{coin}_sell_10_limit_{resistencia}")
             )
-            bot.send_message(
-                call.message.chat.id, 
-                f"⚙️ **Bitget ({mercado_tipo.upper()}): {coin}/USDT**\nSoporte: ${soporte:,.4f} | Resistencia: ${resistencia:,.4f}\nSelecciona monto y orden:", 
-                reply_markup=markup_opciones, 
-                parse_mode="Markdown"
+            
+            texto_opciones = (
+                f"⚙️ **Bitget ({mercado_tipo.upper()}): {coin}/USDT**\n"
+                f"Soporte: ${soporte:,.4f} | Resistencia: ${resistencia:,.4f}\n"
+                "Selecciona monto y orden:"
             )
+            bot.send_message(call.message.chat.id, texto_opciones, reply_markup=markup_opciones, parse_mode="Markdown")
 
         elif accion == "trade" and len(datos) >= 7:
             mercado_tipo, coin, side, margen, tipo_orden, precio_limite = datos[1], datos[2], datos[3], float(datos[4]), datos[5], float(datos[6])
@@ -371,8 +379,4 @@ def iniciar_bot_hilo():
     time.sleep(3)
     try:
         inicializar_mercados()
-        threading.Thread(target=bucle_keep_alive, daemon=True).start()
-        threading.Thread(target=bucle_reportes_automaticos, daemon=True).start()
-        print("¡Hilos de reportes automáticos y keep-alive activos!")
-    except Exception as e:
-        print(f"Erro
+        threading.Thread(
