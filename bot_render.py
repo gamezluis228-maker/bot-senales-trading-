@@ -247,8 +247,7 @@ def callback_query(call):
                 f"📈 **15M:** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n"
                 f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
                 f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
-                f"🎯 **{analisis['estado']}**\n"
-                f"⚙️ Selecciona operación:"
+                f"🎯 **{analisis['estado']}**"
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
             markup_opciones = InlineKeyboardMarkup(row_width=2)
