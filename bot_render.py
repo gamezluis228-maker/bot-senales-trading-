@@ -8,7 +8,7 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Carga de secretos segura desde /etc/secrets/
+# Carga de secretos segura desde /etc/secrets/ por si acaso
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
     try:
@@ -26,10 +26,8 @@ if os.path.exists(secrets_dir):
     except Exception as e:
         print(f"Error al leer carpeta secret files: {e}")
 
+# Token de Telegram
 TOKEN = os.getenv("TEL_TOKEN") or os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN") or ""
-API_KEY = os.getenv("BIT_API_KEY") or os.getenv("BITGET_API_KEY") or os.getenv("API_KEY") or ""
-SECRET_KEY = os.getenv("BIT_SECRET_KEY") or os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("SECRET") or ""
-PASSPHRASE = os.getenv("BIT_PASSPHRASE") or os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE") or os.getenv("PASS") or ""
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
 bot = telebot.TeleBot(TOKEN)
@@ -38,11 +36,27 @@ app = Flask(__name__)
 ULTIMO_CHAT_ID = 7115547861
 ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
 
+# FUNCIÓN DINÁMICA: Obtiene las llaves en tiempo de ejecución para evitar que lleguen vacías
+def obtener_credenciales_bitget():
+    api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
+           os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
+           os.getenv("BIT_KEY") or "")
+           
+    secret = (os.getenv("BITGET_SECRET_KEY") or os.getenv("BIT_SECRET_KEY") or 
+              os.getenv("SECRET_KEY") or os.getenv("SECRET") or 
+              os.getenv("BITGET_SECRET") or os.getenv("BIT_SECRET") or "")
+              
+    password = (os.getenv("BITGET_PASSPHRASE") or os.getenv("BIT_PASSPHRASE") or 
+                os.getenv("PASSPHRASE") or os.getenv("PASS") or 
+                os.getenv("BITGET_PASSWORD") or os.getenv("PASSWORD") or "")
+    return api, secret, password
+
 def crear_instancia_exchange(mercado='swap'):
+    api, secret, password = obtener_credenciales_bitget()
     return ccxt.bitget({
         'enableRateLimit': True,
         'options': {'defaultType': mercado, 'createMarketBuyOrderRequiresPrice': False},
-        'apiKey': API_KEY, 'secret': SECRET_KEY, 'password': PASSPHRASE
+        'apiKey': api, 'secret': secret, 'password': password
     })
 
 exchange_default = crear_instancia_exchange('swap')
@@ -144,7 +158,6 @@ def obtener_analisis_pnt():
             "resistencia": 0.41, "soporte": 0.35, "estado": "BICONOMY ACTIVO", "pausa": "Modo seguro activado."
         }
 
-# Bucle sincronizado exactamente con los cierres de velas de 15M (00, 15, 30, 45)
 def bucle_reportes_automaticos():
     time.sleep(10)
     while True:
@@ -355,9 +368,3 @@ def iniciar_bot_hilo():
         print("¡Hilos de reportes automáticos y keep-alive activos!")
     except Exception as e:
         print(f"Error al iniciar hilos: {e}")
-
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 10000))
-    threading.Thread(target=iniciar_bot_hilo, daemon=True).start()
-    print(f"Iniciando servidor web Flask en puerto {port} y Bot de Telegram...")
-    app.run(host='0.0.0.0', port=port)
