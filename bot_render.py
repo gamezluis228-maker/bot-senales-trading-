@@ -8,14 +8,39 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CREDENCIALES ---
-TOKEN = os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN", "")
+# --- CARGA AUTOMÁTICA DE VARIABLES DESDE RENDER ---
+# Buscamos entre los nombres más comunes para evitar cualquier error de coincidencia:
+TOKEN = (
+    os.getenv("TELEGRAM_TOKEN") 
+    or os.getenv("TOKEN") 
+    or os.getenv("TEL_TOKEN") 
+    or ""
+)
 
-API_KEY = os.getenv("BITGET_API_KEY") or os.getenv("API_KEY") or os.getenv("BITGET_KEY", "")
-SECRET_KEY = os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("BITGET_SECRET", "")
-PASSPHRASE = os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE") or os.getenv("BITGET_PASSWORD", "")
+API_KEY = (
+    os.getenv("BITGET_API_KEY") 
+    or os.getenv("BIT_API_KEY") 
+    or os.getenv("API_KEY") 
+    or ""
+)
+
+SECRET_KEY = (
+    os.getenv("BITGET_SECRET_KEY") 
+    or os.getenv("BIT_SECRET_KEY") 
+    or os.getenv("SECRET_KEY") 
+    or os.getenv("SECRET") 
+    or ""
+)
+
+PASSPHRASE = (
+    os.getenv("BITGET_PASSPHRASE") 
+    or os.getenv("PASSPHRASE") 
+    or os.getenv("PASS") 
+    or ""
+)
 
 print(f"--- DIAGNÓSTICO DE CREDENCIALES ---")
+print(f"TOKEN longitud: {len(TOKEN)}")
 print(f"API_KEY longitud: {len(API_KEY)}")
 print(f"SECRET_KEY longitud: {len(SECRET_KEY)}")
 print(f"PASSPHRASE longitud: {len(PASSPHRASE)}")
