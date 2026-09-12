@@ -252,23 +252,16 @@ def callback_query(call):
                 f"🎯 **{analisis['estado']}**"
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
+            
+            # DISEÑO LIMPIO Y SIMPLIFICADO DE BOTONES:
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
-                InlineKeyboardButton("🟢 Long Mercado ($2)", callback_data=f"trade_{coin}_swap_buy_2_market_0"),
-                InlineKeyboardButton("🟢 Long Mercado ($5)", callback_data=f"trade_{coin}_swap_buy_5_market_0"),
-                InlineKeyboardButton("🟢 Long Mercado ($10)", callback_data=f"trade_{coin}_swap_buy_10_market_0"),
-                InlineKeyboardButton("🔴 Short Mercado ($2)", callback_data=f"trade_{coin}_swap_sell_2_market_0"),
-                InlineKeyboardButton("🔴 Short Mercado ($5)", callback_data=f"trade_{coin}_swap_sell_5_market_0"),
-                InlineKeyboardButton("🔴 Short Mercado ($10)", callback_data=f"trade_{coin}_swap_sell_10_market_0"),
-                InlineKeyboardButton("🎯 Long Límite (Soporte $5)", callback_data=f"trade_{coin}_swap_buy_5_limit_{soporte}"),
-                InlineKeyboardButton("🎯 Short Límite (Resist. $5)", callback_data=f"trade_{coin}_swap_sell_5_limit_{resistencia}"),
-                # SPOT - COMPRA Y VENTA AÑADIDOS AQUÍ:
                 InlineKeyboardButton("🟢 Spot Comprar ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
                 InlineKeyboardButton("🔴 Spot Vender ($2)", callback_data=f"trade_{coin}_spot_sell_2_market_0"),
                 InlineKeyboardButton("🟢 Spot Comprar ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
                 InlineKeyboardButton("🔴 Spot Vender ($5)", callback_data=f"trade_{coin}_spot_sell_5_market_0"),
-                InlineKeyboardButton("🟢 Spot Comprar ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0"),
-                InlineKeyboardButton("🔴 Spot Vender ($10)", callback_data=f"trade_{coin}_spot_sell_10_market_0")
+                InlineKeyboardButton("🎯 Límite Soporte ($2)", callback_data=f"trade_{coin}_spot_buy_2_limit_{soporte}"),
+                InlineKeyboardButton("🎯 Límite Soporte ($5)", callback_data=f"trade_{coin}_spot_buy_5_limit_{soporte}")
             )
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
 
@@ -277,7 +270,7 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Procesando orden {tipo_orden} (${margen})...")
             exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen, tipo_orden, precio_limite)
             if exito:
-                bot.send_message(call.message.chat.id, f"✅ **¡Operación Ejecutada en Bitget!**\n\n• Activo: {coin}/USDT\n• Mercado: {mercado.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"✅ **¡Operación Spot Ejecutada!**\n\n• Activo: {coin}/USDT\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, f"❌ Error en Bitget:\n{resultado}")
 
