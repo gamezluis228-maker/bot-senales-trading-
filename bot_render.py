@@ -37,8 +37,6 @@ app = Flask(__name__)
 
 ULTIMO_CHAT_ID = 7115547861
 ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0, "DOGE": 0}
-posiciones_activas = []
-bloqueo_posiciones = threading.Lock()
 
 def crear_instancia_exchange(mercado='swap'):
     config = {
@@ -152,14 +150,61 @@ def obtener_analisis_pnt():
             "resistencia": precio_actual * 1.08, 
             "soporte": precio_actual * 0.92,
             "estado": "TENDENCIA ACTIVA EN SPOT", 
-            "pausa": f"Cambio 24h: {cambio_24h:+.2f}% - Sincronizado."
+            "pausa": f"Cambio 24h: {cambio_24h:+.2f}% - Red Pública Sincronizada."
         }
-    except Exception:
+    except Exception as e:
         return {
             "precio": 0.385188, "tendencia_1h": "ALCISTA 🟢", "adx_1h": 25.0, "rsi_1h": 60.0,
             "tendencia_15m": "ALCISTA 🟢", "adx_15m": 20.0, "rsi_15m": 70.0,
-            "resistencia": 0.41, "soporte": 0.35, "estado": "SPOT BICONOMY ACTIVO", "pausa": "Modo seguro activado."
+            "resistencia": 0.41, "soporte": 0.35, "estado": "SPOT BICONOMY ACTIVO", "pausa": f"Modo seguro (Err: {str(e)[:20]})"
         }
+
+# Bucle independiente y seguro para reportes automáticos de 15 minutos
+def bucle_reportes_automaticos():
+    time.sleep(10)
+    while True:
+        now = time.time()
+        
+        # 1. Bloque exclusivo y blindado para PNT (Red Pública Biconomy / Coingecko)
+        try:
+            if now - ultimos_timestamps["PNT"] >= 900:
+                ultimos_timestamps["PNT"] = now
+                analisis_pnt = obtener_analisis_pnt()
+                reporte_pnt = (
+                    f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
+                    f"⚡ **SPOT BICONOMY: PNT/USDT**\n\n"
+                    f"💵 **Precio Actual:** ${analisis_pnt['precio']:.6f}\n\n"
+                    f"📊 **MACRO (1H):** {analisis_pnt['tendencia_1h']} | ADX: {analisis_pnt['adx_1h']} | RSI: {analisis_pnt['rsi_1h']}\n"
+                    f"📈 **15M:** {analisis_pnt['tendencia_15m']} | ADX: {analisis_pnt['adx_15m']} | RSI: {analisis_pnt['rsi_15m']}\n\n"
+                    f"🧱 Resistencia: ${analisis_pnt['resistencia']:.6f}\n🟡 Soporte: ${analisis_pnt['soporte']:.6f}\n\n"
+                    f"🎯 **{analisis_pnt['estado']}**\n• {analisis_pnt['pausa']}"
+                )
+                if ULTIMO_CHAT_ID:
+                    bot.send_message(ULTIMO_CHAT_ID, reporte_pnt, parse_mode="Markdown")
+        except Exception as e:
+            print(f"Error en envío automático PNT: {e}")
+
+        # 2. Bloque para BTC y ZEC (Bitget)
+        for coin in ["BTC", "ZEC"]:
+            try:
+                if now - ultimos_timestamps[coin] >= 900:
+                    ultimos_timestamps[coin] = now
+                    analisis = obtener_analisis_tecnico(coin)
+                    reporte = (
+                        f"🔔 **REPORTE AUTOMÁTICO CIERRE 15M / 1H** 🔔\n"
+                        f"⚡ **Activo:** {coin}/USDT\n\n"
+                        f"💵 **Precio Actual:** ${analisis['precio']:,.2f}\n\n"
+                        f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
+                        f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                        f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
+                        f"🎯 **SEÑAL:**\n• {analisis['estado']}\n• {analisis['pausa']}"
+                    )
+                    if ULTIMO_CHAT_ID:
+                        bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Error en envío automático {coin}: {e}")
+
+        time.sleep(20)
 
 @bot.message_handler(commands=['pnt', 'ptn'])
 def comando_pnt(message):
@@ -182,9 +227,7 @@ def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
     markup = InlineKeyboardMarkup(row_width=2)
-    
     monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE"]
-    
     botones = [InlineKeyboardButton(coin, callback_data=f"analisis_{coin}") for coin in monedas]
     markup.add(*botones)
     markup.add(InlineKeyboardButton("📡 Radar Mercado", callback_data="radar_mercado"))
@@ -201,7 +244,6 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
-        
         ticker = ex.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
         precio_ejecucion = precio_personalizado if (tipo_orden == 'limit' and precio_personalizado) else precio_actual
@@ -212,11 +254,11 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
             params['createMarketBuyOrderRequiresPrice'] = False
 
         orden = ex.create_order(
-            symbol=market_symbol, type=tipo_orden, side=side, amount=amount_tokens,
-            price=ex.price_to_precision(market_symbol, precio_ejecucion) if tipo_orden == 'limit' else precio_actual,
+            symbol=market_symbol, type=tipo_orden, side=side, 
+            amount=ex.amount_to_precision(market_symbol, amount_tokens),
+            price=ex.price_to_precision(market_symbol, precio_ejecucion) if tipo_orden == 'limit' else None,
             params=params
         )
-
         return True, precio_ejecucion, orden
     except Exception as e:
         return False, 0, str(e)
@@ -245,8 +287,6 @@ def callback_query(call):
                 f"🎯 **{analisis['estado']}**"
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
-            
-            # MENÚ SPOT LIMPIO Y SIMÉTRICO ($2, $5 y $10)
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🟢 Mercado ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
@@ -266,9 +306,9 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Procesando orden {tipo_orden} (${margen})...")
             exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen, tipo_orden, precio_limite)
             if exito:
-                bot.send_message(call.message.chat.id, f"✅ **¡Orden Spot Ejecutada en Bitget!**\n\n• Activo: {coin}/USDT\n• Operación: {side.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"✅ **¡Orden Ejecutada Correctamente!**\n\n• Activo: {coin}/USDT\n• Operación: {side.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
             else:
-                bot.send_message(call.message.chat.id, f"❌ Error en Bitget:\n{resultado}")
+                bot.send_message(call.message.chat.id, f"❌ Error en la orden:\n{resultado}")
 
         elif call.data == "radar_mercado":
             bot.answer_callback_query(call.id, "Radar activo")
@@ -281,7 +321,8 @@ def iniciar_bot_hilo():
     try:
         inicializar_mercados()
         threading.Thread(target=bucle_keep_alive, daemon=True).start()
-        print("¡Hilos iniciados correctamente!")
+        threading.Thread(target=bucle_reportes_automaticos, daemon=True).start()
+        print("¡Hilos de reportes independientes iniciados correctamente!")
     except Exception as e:
         print(f"Error al iniciar hilos: {e}")
 
