@@ -234,7 +234,6 @@ def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
     markup = InlineKeyboardMarkup(row_width=2)
-    # Estructura ordenada con las monedas solicitadas: ETH, BTC, ZEC, DOGE, SOL, XRP
     monedas = ["ETH", "BTC", "ZEC", "DOGE", "SOL", "XRP", "PNT"]
     botones = []
     for coin in monedas:
@@ -376,4 +375,5 @@ def callback_query(call):
             if exito:
                 bot.send_message(call.message.chat.id, f"✅ **¡Orden Ejecutada con Éxito en Bitget!**\n\n• Mercado: {mercado_tipo.upper()}\n• Activo: {coin}/USDT\n• Lado: {side.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
             else:
-                bot.sen
+                bot.send_message(call.message.chat.id, f"{resultado}", parse_mode="Markdown")
+    except Exc
