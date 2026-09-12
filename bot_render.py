@@ -47,15 +47,21 @@ def obtener_credenciales_bitget():
     password = (os.getenv("BITGET_PASSPHRASE") or os.getenv("BIT_PASSPHRASE") or 
                 os.getenv("PASSPHRASE") or os.getenv("PASS") or 
                 os.getenv("BITGET_PASSWORD") or os.getenv("PASSWORD") or "")
-    return api, secret, password
+    return api.strip(), secret.strip(), password.strip()
 
 def crear_instancia_exchange(mercado='swap'):
     api, secret, password = obtener_credenciales_bitget()
-    return ccxt.bitget({
+    config = {
         'enableRateLimit': True,
-        'options': {'defaultType': mercado, 'createMarketBuyOrderRequiresPrice': False},
-        'apiKey': api, 'secret': secret, 'password': password
-    })
+        'options': {'defaultType': mercado, 'createMarketBuyOrderRequiresPrice': False}
+    }
+    if api:
+        config['apiKey'] = api
+    if secret:
+        config['secret'] = secret
+    if password:
+        config['password'] = password
+    return ccxt.bitget(config)
 
 exchange_default = crear_instancia_exchange('swap')
 
@@ -373,10 +379,4 @@ def callback_query(call):
             else:
                 bot.send_message(call.message.chat.id, f"{resultado}", parse_mode="Markdown")
     except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
-
-def iniciar_bot_hilo():
-    time.sleep(3)
-    try:
-        inicializar_mercados()
-        threading.Thread(
+        bot.send_message(call.message.chat.id, f"❌ Error 
