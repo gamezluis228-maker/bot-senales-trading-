@@ -8,18 +8,23 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CARGAR AUTOMÁTICO DESDE SECRET FILES DE RENDER ---
-ruta_secret_file = "/etc/secrets/.env"
-if os.path.exists(ruta_secret_file):
+# --- CARGAR AUTOMÁTICO DESDE CUALQUIER ARCHIVO EN SECRET FILES ---
+secrets_dir = "/etc/secrets"
+if os.path.exists(secrets_dir):
     try:
-        with open(ruta_secret_file, "r") as f:
-            for linea in f:
-                if "=" in linea and not linea.strip().startswith("#"):
-                    k, v = linea.strip().split("=", 1)
-                    os.environ[k.strip()] = v.strip().strip("'\"")
-        print("¡Archivo secreto cargado desde /etc/secrets/.env exitosamente!")
+        for filename in os.listdir(secrets_dir):
+            filepath = os.path.join(secrets_dir, filename)
+            if os.path.isfile(filepath):
+                with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
+                    for linea in f:
+                        if "=" in linea and not linea.strip().startswith("#"):
+                            partes = linea.strip().split("=", 1)
+                            if len(partes) == 2:
+                                k, v = partes[0].strip(), partes[1].strip().strip("'\"")
+                                os.environ[k] = v
+        print("¡Secretos escaneados y cargados desde /etc/secrets/ exitosamente!")
     except Exception as e:
-        print(f"Error al leer secret file: {e}")
+        print(f"Error al leer carpeta secret files: {e}")
 
 # --- CARGA DE VARIABLES Y RESPALDOS ---
 TOKEN = (
@@ -305,8 +310,8 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
         if mercado == 'swap':
             sl = precio_ejecucion * 0.96 if side == 'buy' else precio_ejecucion * 1.04
             tp = precio_ejecucion * 1.08 if side == 'buy' else precio_ejecucion * 0.92
+            # Corrección de parámetros para Bitget (evita enviar stopLossPrice y takeProfitPrice juntos si la API exige un formato específico o sólo uno)
             params['stopLossPrice'] = ex.price_to_precision(market_symbol, sl)
-            params['takeProfitPrice'] = ex.price_to_precision(market_symbol, tp)
             params['tradeSide'] = position_side
 
         if tipo_orden == 'market' and side == 'buy':
@@ -387,8 +392,7 @@ def callback_query(call):
                     f"• Mercado: {mercado.upper()}\n"
                     f"• Margen: ${margen} USDT\n"
                     f"• Precio: ${precio:,.2f}\n"
-                    f"• Take Profit: +8% 🎯\n"
-                    f"• Stop Loss: -4% 🛡️"
+                    f"• Stop Loss configurado 🛡️"
                 )
             else:
                 bot.send_message(call.message.chat.id, f"❌ Error en Bitget:\n{resultado}")
@@ -459,13 +463,4 @@ def iniciar_bot_hilo():
     time.sleep(3)
     try:
         inicializar_mercados()
-        threading.Thread(target=bucle_keep_alive, daemon=True).start()
-        threading.Thread(target=bucle_monitoreo_posiciones, daemon=True).start()
-        threading.Thread(target=bucle_alertas_15m, daemon=True).start()
-    except Exception as e:
-        print(f"Error hilos: {e}")
-
-    while True:
-        try:
-            bot.remove_webhook()
-            print("🤖 Bot conectado y escuchando comandos de Telegram...")
+        threading.Thread(target=bucle_keep_alive, da
