@@ -33,7 +33,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 ULTIMO_CHAT_ID = 7115547861
-ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
+ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0, "ETH": 0, "SOL": 0, "XRP": 0}
 
 def obtener_credenciales_bitget():
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
@@ -163,9 +163,6 @@ def obtener_analisis_pnt():
         }
 
 def bucle_reportes_automaticos():
-    now_ts = time.time()
-    for coin in ["PNT", "BTC", "ZEC"]:
-        ultimos_timestamps[coin] = now_ts
     time.sleep(10)
     while True:
         try:
@@ -173,7 +170,8 @@ def bucle_reportes_automaticos():
             minuto = tiempo_actual.tm_min
             if minuto in [0, 15, 30, 45]:
                 now_ts = time.time()
-                for coin in ["PNT", "BTC", "ZEC"]:
+                coins_a_reportar = ["PNT", "BTC", "ETH", "ZEC", "SOL", "XRP"]
+                for coin in coins_a_reportar:
                     if now_ts - ultimos_timestamps.get(coin, 0) > 800:
                         ultimos_timestamps[coin] = now_ts
                         if coin == "PNT":
@@ -236,7 +234,8 @@ def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
     markup = InlineKeyboardMarkup(row_width=2)
-    monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE", "PNT"]
+    # Estructura ordenada con las monedas solicitadas: ETH, BTC, ZEC, DOGE, SOL, XRP
+    monedas = ["ETH", "BTC", "ZEC", "DOGE", "SOL", "XRP", "PNT"]
     botones = []
     for coin in monedas:
         if coin == "PNT":
@@ -331,15 +330,15 @@ def callback_query(call):
         elif call.data == "menu_futuros":
             bot.answer_callback_query(call.id, "Abriendo Futuros...")
             markup = InlineKeyboardMarkup(row_width=2)
-            monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE"]
-            markup.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in monedas])
+            monedas_operacion = ["ETH", "BTC", "ZEC", "DOGE", "SOL", "XRP"]
+            markup.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in monedas_operacion])
             bot.send_message(call.message.chat.id, "⚡ **Selecciona el activo para operar en FUTUROS (Bitget):**", reply_markup=markup, parse_mode="Markdown")
 
         elif call.data == "menu_spot":
             bot.answer_callback_query(call.id, "Abriendo Spot Bitget...")
             markup = InlineKeyboardMarkup(row_width=2)
-            monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE"]
-            markup.add(*[InlineKeyboardButton(f"🪙 {c}", callback_data=f"opc_spot_{c}") for c in monedas])
+            monedas_operacion = ["ETH", "BTC", "ZEC", "DOGE", "SOL", "XRP"]
+            markup.add(*[InlineKeyboardButton(f"🪙 {c}", callback_data=f"opc_spot_{c}") for c in monedas_operacion])
             bot.send_message(call.message.chat.id, "🪙 **Selecciona el activo para operar en SPOT (Bitget):**", reply_markup=markup, parse_mode="Markdown")
 
         elif len(datos) == 3 and datos[0] == "opc":
@@ -365,7 +364,7 @@ def callback_query(call):
             texto_opciones = (
                 f"⚙️ **Bitget ({mercado_tipo.upper()}): {coin}/USDT**\n"
                 f"Soporte: ${soporte:,.4f} | Resistencia: ${resistencia:,.4f}\n"
-                "Selecciona monto y orden:"
+                "Selecciona monto y tipo de operación:"
             )
             bot.send_message(call.message.chat.id, texto_opciones, reply_markup=markup_opciones, parse_mode="Markdown")
 
@@ -377,6 +376,4 @@ def callback_query(call):
             if exito:
                 bot.send_message(call.message.chat.id, f"✅ **¡Orden Ejecutada con Éxito en Bitget!**\n\n• Mercado: {mercado_tipo.upper()}\n• Activo: {coin}/USDT\n• Lado: {side.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
             else:
-                bot.send_message(call.message.chat.id, f"{resultado}", parse_mode="Markdown")
-    except Exception as e:
-        bot.send_message(call.message.chat.id, f"❌ Error 
+                bot.sen
