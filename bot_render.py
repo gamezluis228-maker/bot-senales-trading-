@@ -26,7 +26,6 @@ if os.path.exists(secrets_dir):
     except Exception as e:
         print(f"Error al leer carpeta secret files: {e}")
 
-# Token de Telegram
 TOKEN = os.getenv("TEL_TOKEN") or os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN") or ""
 RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 
@@ -36,7 +35,6 @@ app = Flask(__name__)
 ULTIMO_CHAT_ID = 7115547861
 ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
 
-# FUNCIÓN DINÁMICA: Obtiene las llaves en tiempo de ejecución para evitar que lleguen vacías
 def obtener_credenciales_bitget():
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
            os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
@@ -159,18 +157,19 @@ def obtener_analisis_pnt():
         }
 
 def bucle_reportes_automaticos():
+    now_ts = time.time()
+    for coin in ["PNT", "BTC", "ZEC"]:
+        ultimos_timestamps[coin] = now_ts
     time.sleep(10)
     while True:
         try:
             tiempo_actual = time.localtime()
             minuto = tiempo_actual.tm_min
-            
             if minuto in [0, 15, 30, 45]:
                 now_ts = time.time()
                 for coin in ["PNT", "BTC", "ZEC"]:
                     if now_ts - ultimos_timestamps.get(coin, 0) > 800:
                         ultimos_timestamps[coin] = now_ts
-                        
                         if coin == "PNT":
                             analisis = obtener_analisis_pnt()
                             reporte = (
@@ -198,11 +197,9 @@ def bucle_reportes_automaticos():
                             )
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
-                
                 time.sleep(60) 
         except Exception as e:
             print(f"Error en bucle automático: {e}")
-            
         time.sleep(15)
 
 @bot.message_handler(commands=['pnt', 'ptn'])
@@ -289,6 +286,7 @@ def callback_query(call):
         if not datos:
             return
         accion = datos[0]
+
         if accion == "ver" and len(datos) >= 2:
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Consultando {coin}...")
@@ -316,24 +314,28 @@ def callback_query(call):
                     f"🎯 **{analisis['estado']}**"
                 )
                 bot.send_message(call.message.chat.id, reporte, parse_mode="Markdown")
+
         elif call.data == "menu_futuros":
             bot.answer_callback_query(call.id, "Abriendo Futuros...")
             markup = InlineKeyboardMarkup(row_width=2)
             monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE"]
             markup.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in monedas])
             bot.send_message(call.message.chat.id, "⚡ **Selecciona el activo para operar en FUTUROS (Bitget):**", reply_markup=markup, parse_mode="Markdown")
+
         elif call.data == "menu_spot":
             bot.answer_callback_query(call.id, "Abriendo Spot Bitget...")
             markup = InlineKeyboardMarkup(row_width=2)
             monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE"]
             markup.add(*[InlineKeyboardButton(f"🪙 {c}", callback_data=f"opc_spot_{c}") for c in monedas])
             bot.send_message(call.message.chat.id, "🪙 **Selecciona el activo para operar en SPOT (Bitget):**", reply_markup=markup, parse_mode="Markdown")
+
         elif len(datos) == 3 and datos[0] == "opc":
             mercado_tipo, coin = datos[1], datos[2]
             mercado_key = 'swap' if mercado_tipo == 'fut' else 'spot'
-            bot.answer_callback_query(call.id, f"Cargando panel para {coin}...")
+            bot.answer_callback_query(call.id, f"Cargando montos para {coin}...")
             analisis = obtener_analisis_bitget(coin, mercado_key)
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
+            
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🟢 Mercado ($2)", callback_data=f"trade_{mercado_tipo}_{coin}_buy_2_market_0"),
@@ -346,7 +348,13 @@ def callback_query(call):
                 InlineKeyboardButton("🔴 Resistencia ($5)", callback_data=f"trade_{mercado_tipo}_{coin}_sell_5_limit_{resistencia}"),
                 InlineKeyboardButton("🔴 Resistencia ($10)", callback_data=f"trade_{mercado_tipo}_{coin}_sell_10_limit_{resistencia}")
             )
-            bot.send_message(call.message.chat.id, f"⚙️ **Bitget ({mercado_tipo.upper()}): {coin}/USDT**\nSoporte: ${soporte:,.4f} | Resistencia: ${resistencia:,.4f}\nSelecciona monto y orden:", reply_markup=markup_opciones, parse_mode="Markdown")
+            bot.send_message(
+                call.message.chat.id, 
+                f"⚙️ **Bitget ({mercado_tipo.upper()}): {coin}/USDT**\nSoporte: ${soporte:,.4f} | Resistencia: ${resistencia:,.4f}\nSelecciona monto y orden:", 
+                reply_markup=markup_opciones, 
+                parse_mode="Markdown"
+            )
+
         elif accion == "trade" and len(datos) >= 7:
             mercado_tipo, coin, side, margen, tipo_orden, precio_limite = datos[1], datos[2], datos[3], float(datos[4]), datos[5], float(datos[6])
             mercado_key = 'swap' if mercado_tipo == 'fut' else 'spot'
@@ -367,4 +375,4 @@ def iniciar_bot_hilo():
         threading.Thread(target=bucle_reportes_automaticos, daemon=True).start()
         print("¡Hilos de reportes automáticos y keep-alive activos!")
     except Exception as e:
-        print(f"Error al iniciar hilos: {e}")
+        print(f"Erro
