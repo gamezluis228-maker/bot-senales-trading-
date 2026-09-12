@@ -191,26 +191,13 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
-        position_side = 'long' if side == 'buy' else 'short' if mercado == 'swap' else None
-
-        if mercado == 'swap':
-            try:
-                ex.set_leverage(5, market_symbol, {'marginCoin': 'USDT'})
-            except Exception:
-                pass
-
+        
         ticker = ex.fetch_ticker(market_symbol)
         precio_actual = ticker['last']
         precio_ejecucion = precio_personalizado if (tipo_orden == 'limit' and precio_personalizado) else precio_actual
         amount_tokens = margen_usdt / precio_ejecucion
 
         params = {}
-        if mercado == 'swap':
-            sl = precio_ejecucion * 0.96 if side == 'buy' else precio_ejecucion * 1.04
-            tp = precio_ejecucion * 1.08 if side == 'buy' else precio_ejecucion * 0.92
-            params['stopLossPrice'] = ex.price_to_precision(market_symbol, sl)
-            params['tradeSide'] = position_side
-
         if tipo_orden == 'market' and side == 'buy':
             params['createMarketBuyOrderRequiresPrice'] = False
 
@@ -219,10 +206,6 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
             price=ex.price_to_precision(market_symbol, precio_ejecucion) if tipo_orden == 'limit' else precio_actual,
             params=params
         )
-
-        if mercado == 'swap':
-            with bloqueo_posiciones:
-                posiciones_activas.append({'symbol': market_symbol, 'side': position_side.upper(), 'chat_id': ULTIMO_CHAT_ID, 'tiempo': time.time()})
 
         return True, precio_ejecucion, orden
     except Exception as e:
@@ -243,7 +226,7 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Calculando temporalidades para {coin}...")
             analisis = obtener_analisis_tecnico(coin)
             reporte = (
-                f"⚡ **BITGET: {coin}/USDT**\n\n"
+                f"⚡ **BITGET SPOT: {coin}/USDT**\n\n"
                 f"💵 Precio: ${analisis['precio']:,.4f}\n"
                 f"📊 **1H:** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
                 f"📈 **15M:** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n"
@@ -253,15 +236,18 @@ def callback_query(call):
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
             
-            # DISEÑO LIMPIO Y SIMPLIFICADO DE BOTONES:
+            # MENÚ SPOT CONFIGURADO CON $2, $5 Y $10
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
-                InlineKeyboardButton("🟢 Spot Comprar ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
-                InlineKeyboardButton("🔴 Spot Vender ($2)", callback_data=f"trade_{coin}_spot_sell_2_market_0"),
-                InlineKeyboardButton("🟢 Spot Comprar ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
-                InlineKeyboardButton("🔴 Spot Vender ($5)", callback_data=f"trade_{coin}_spot_sell_5_market_0"),
+                InlineKeyboardButton("🟢 Mercado ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
+                InlineKeyboardButton("🟢 Mercado ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
+                InlineKeyboardButton("🟢 Mercado ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0"),
                 InlineKeyboardButton("🎯 Límite Soporte ($2)", callback_data=f"trade_{coin}_spot_buy_2_limit_{soporte}"),
-                InlineKeyboardButton("🎯 Límite Soporte ($5)", callback_data=f"trade_{coin}_spot_buy_5_limit_{soporte}")
+                InlineKeyboardButton("🎯 Límite Soporte ($5)", callback_data=f"trade_{coin}_spot_buy_5_limit_{soporte}"),
+                InlineKeyboardButton("🎯 Límite Soporte ($10)", callback_data=f"trade_{coin}_spot_buy_10_limit_{soporte}"),
+                InlineKeyboardButton("🔴 Límite Resistencia ($2)", callback_data=f"trade_{coin}_spot_sell_2_limit_{resistencia}"),
+                InlineKeyboardButton("🔴 Límite Resistencia ($5)", callback_data=f"trade_{coin}_spot_sell_5_limit_{resistencia}"),
+                InlineKeyboardButton("🔴 Límite Resistencia ($10)", callback_data=f"trade_{coin}_spot_sell_10_limit_{resistencia}")
             )
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
 
@@ -270,7 +256,7 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Procesando orden {tipo_orden} (${margen})...")
             exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen, tipo_orden, precio_limite)
             if exito:
-                bot.send_message(call.message.chat.id, f"✅ **¡Operación Spot Ejecutada!**\n\n• Activo: {coin}/USDT\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"✅ **¡Orden Spot Ejecutada en Bitget!**\n\n• Activo: {coin}/USDT\n• Operación: {side.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, f"❌ Error en Bitget:\n{resultado}")
 
