@@ -36,7 +36,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 ULTIMO_CHAT_ID = 7115547861
-ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
+ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0, "DOGE": 0}
 posiciones_activas = []
 bloqueo_posiciones = threading.Lock()
 
@@ -172,7 +172,9 @@ def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
     markup = InlineKeyboardMarkup(row_width=2)
-    monedas = ["BTC", "ETH", "XRP", "ZEC"]
+    
+    monedas = ["BTC", "ETH", "XRP", "ZEC", "DOGE"]
+    
     botones = [InlineKeyboardButton(coin, callback_data=f"analisis_{coin}") for coin in monedas]
     markup.add(*botones)
     markup.add(InlineKeyboardButton("📡 Radar Mercado", callback_data="radar_mercado"))
@@ -180,7 +182,7 @@ def mostrar_menu_principal(message):
     texto_menu = (
         "CRYPTO ANÁLISIS MULTITEMPORAL 🟢\n\n"
         "🤖 Selecciona una criptomoneda para ver 1H y 15M:\n"
-        "*(Alertas automáticas de 15m para BTC, ZEC y PNT activas)*\n\n"
+        "*(Alertas automáticas de 15m para BTC, ZEC, PNT y DOGE)*\n\n"
         "💡 Usa /pnt para ver el análisis de PNT"
     )
     bot.send_message(message.chat.id, texto_menu, reply_markup=markup, parse_mode="Markdown")
@@ -241,12 +243,12 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Calculando temporalidades para {coin}...")
             analisis = obtener_analisis_tecnico(coin)
             reporte = (
-                f"⚡ **FUTUROS BITGET: {coin}/USDT**\n\n"
-                f"💵 Precio: ${analisis['precio']:,.2f}\n"
+                f"⚡ **BITGET: {coin}/USDT**\n\n"
+                f"💵 Precio: ${analisis['precio']:,.4f}\n"
                 f"📊 **1H:** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
                 f"📈 **15M:** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n"
-                f"🧱 Resistencia: ${analisis['resistencia']:,.2f}\n"
-                f"🟡 Soporte: ${analisis['soporte']:,.2f}\n\n"
+                f"🧱 Resistencia: ${analisis['resistencia']:,.4f}\n"
+                f"🟡 Soporte: ${analisis['soporte']:,.4f}\n\n"
                 f"🎯 **{analisis['estado']}**"
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
@@ -260,8 +262,13 @@ def callback_query(call):
                 InlineKeyboardButton("🔴 Short Mercado ($10)", callback_data=f"trade_{coin}_swap_sell_10_market_0"),
                 InlineKeyboardButton("🎯 Long Límite (Soporte $5)", callback_data=f"trade_{coin}_swap_buy_5_limit_{soporte}"),
                 InlineKeyboardButton("🎯 Short Límite (Resist. $5)", callback_data=f"trade_{coin}_swap_sell_5_limit_{resistencia}"),
-                InlineKeyboardButton("🟢 Spot ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
-                InlineKeyboardButton("🟢 Spot ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0")
+                # SPOT - COMPRA Y VENTA AÑADIDOS AQUÍ:
+                InlineKeyboardButton("🟢 Spot Comprar ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
+                InlineKeyboardButton("🔴 Spot Vender ($2)", callback_data=f"trade_{coin}_spot_sell_2_market_0"),
+                InlineKeyboardButton("🟢 Spot Comprar ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
+                InlineKeyboardButton("🔴 Spot Vender ($5)", callback_data=f"trade_{coin}_spot_sell_5_market_0"),
+                InlineKeyboardButton("🟢 Spot Comprar ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0"),
+                InlineKeyboardButton("🔴 Spot Vender ($10)", callback_data=f"trade_{coin}_spot_sell_10_market_0")
             )
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
 
@@ -270,13 +277,13 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Procesando orden {tipo_orden} (${margen})...")
             exito, precio, resultado = ejecutar_orden_bitget(coin, mercado, side, margen, tipo_orden, precio_limite)
             if exito:
-                bot.send_message(call.message.chat.id, f"✅ **¡Operación Ejecutada en Bitget!**\n\n• Activo: {coin}/USDT\n• Margen: ${margen}\n• Precio: ${precio:,.2f}\n• Stop Loss activo 🛡️", parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"✅ **¡Operación Ejecutada en Bitget!**\n\n• Activo: {coin}/USDT\n• Mercado: {mercado.upper()}\n• Margen: ${margen}\n• Precio: ${precio:,.4f}", parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, f"❌ Error en Bitget:\n{resultado}")
 
         elif call.data == "radar_mercado":
             bot.answer_callback_query(call.id, "Radar activo")
-            bot.send_message(call.message.chat.id, "📡 **Radar de Mercado:** Filtro multitemporal activo.")
+            bot.send_message(call.message.chat.id, "📡 **Radar de Mercado:** Filtro multitemporal activo con 15M.")
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Error crítico: {str(e)}")
 
