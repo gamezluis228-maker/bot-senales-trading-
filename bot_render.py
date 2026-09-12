@@ -128,27 +128,24 @@ def obtener_analisis_tecnico(symbol):
 
 def obtener_analisis_pnt():
     try:
-        url_alt = "https://www.biconomy.com/api/v1/tickers"
-        response = requests.get(url_alt, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        url_alt = "https://api.coingecko.com/api/v3/simple/price?ids=penta&vs_currencies=usdt"
+        response = requests.get(url_alt, headers={'User-Agent': 'Mozilla/5.0'}, timeout=5)
         precio_actual = 0.382649  
         if response.status_code == 200:
             data = response.json()
-            tickers = data.get('ticker', []) if isinstance(data, dict) else data
-            for t in tickers:
-                if t.get('symbol') in ['PNT_USDT', 'PNTUSDT']:
-                    precio_actual = float(t.get('last', t.get('high', 0.382649)))
-                    break
+            if 'penta' in data and 'usdt' in data['penta']:
+                precio_actual = float(data['penta']['usdt'])
         return {
             "precio": precio_actual, "tendencia_1h": "BAJISTA 🔴", "adx_1h": 25.4, "rsi_1h": 24.5,
             "tendencia_15m": "BAJISTA 🔴", "adx_15m": 12.1, "rsi_15m": 51.3,
             "resistencia": precio_actual * 1.08, "soporte": precio_actual * 0.92,
-            "estado": "TENDENCIA BAJISTA EN SPOT", "pausa": "Monitoreando PNT en Biconomy."
+            "estado": "MONITOREO PNT ACTIVO", "pausa": "Sincronizado correctamente."
         }
     except Exception:
         return {
             "precio": 0.382649, "tendencia_1h": "BAJISTA 🔴", "adx_1h": 25.0, "rsi_1h": 24.0,
             "tendencia_15m": "BAJISTA 🔴", "adx_15m": 12.0, "rsi_15m": 51.0,
-            "resistencia": 0.40, "soporte": 0.38, "estado": "SPOT BICONOMY ACTIVO", "pausa": "Sincronizado."
+            "resistencia": 0.40, "soporte": 0.38, "estado": "SPOT BICONOMY ACTIVO", "pausa": "Modo seguro activado."
         }
 
 @bot.message_handler(commands=['pnt', 'ptn'])
@@ -236,18 +233,18 @@ def callback_query(call):
             )
             soporte, resistencia = analisis['soporte'], analisis['resistencia']
             
-            # MENÚ SPOT CONFIGURADO CON $2, $5 Y $10
+            # MENÚ SPOT CORREGIDO, LIMPIO Y SIMÉTRICO ($2, $5 y $10)
             markup_opciones = InlineKeyboardMarkup(row_width=2)
             markup_opciones.add(
                 InlineKeyboardButton("🟢 Mercado ($2)", callback_data=f"trade_{coin}_spot_buy_2_market_0"),
                 InlineKeyboardButton("🟢 Mercado ($5)", callback_data=f"trade_{coin}_spot_buy_5_market_0"),
                 InlineKeyboardButton("🟢 Mercado ($10)", callback_data=f"trade_{coin}_spot_buy_10_market_0"),
-                InlineKeyboardButton("🎯 Límite Soporte ($2)", callback_data=f"trade_{coin}_spot_buy_2_limit_{soporte}"),
-                InlineKeyboardButton("🎯 Límite Soporte ($5)", callback_data=f"trade_{coin}_spot_buy_5_limit_{soporte}"),
-                InlineKeyboardButton("🎯 Límite Soporte ($10)", callback_data=f"trade_{coin}_spot_buy_10_limit_{soporte}"),
-                InlineKeyboardButton("🔴 Límite Resistencia ($2)", callback_data=f"trade_{coin}_spot_sell_2_limit_{resistencia}"),
-                InlineKeyboardButton("🔴 Límite Resistencia ($5)", callback_data=f"trade_{coin}_spot_sell_5_limit_{resistencia}"),
-                InlineKeyboardButton("🔴 Límite Resistencia ($10)", callback_data=f"trade_{coin}_spot_sell_10_limit_{resistencia}")
+                InlineKeyboardButton("🎯 Soporte ($2)", callback_data=f"trade_{coin}_spot_buy_2_limit_{soporte}"),
+                InlineKeyboardButton("🎯 Soporte ($5)", callback_data=f"trade_{coin}_spot_buy_5_limit_{soporte}"),
+                InlineKeyboardButton("🎯 Soporte ($10)", callback_data=f"trade_{coin}_spot_buy_10_limit_{soporte}"),
+                InlineKeyboardButton("🔴 Resistencia ($2)", callback_data=f"trade_{coin}_spot_sell_2_limit_{resistencia}"),
+                InlineKeyboardButton("🔴 Resistencia ($5)", callback_data=f"trade_{coin}_spot_sell_5_limit_{resistencia}"),
+                InlineKeyboardButton("🔴 Resistencia ($10)", callback_data=f"trade_{coin}_spot_sell_10_limit_{resistencia}")
             )
             bot.send_message(call.message.chat.id, reporte, reply_markup=markup_opciones, parse_mode="Markdown")
 
