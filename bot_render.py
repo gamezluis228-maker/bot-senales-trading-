@@ -8,7 +8,6 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CARGAR AUTOMÁTICO DESDE CUALQUIER ARCHIVO EN SECRET FILES ---
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
     try:
@@ -26,36 +25,10 @@ if os.path.exists(secrets_dir):
     except Exception as e:
         print(f"Error al leer carpeta secret files: {e}")
 
-# --- CARGA DE VARIABLES Y RESPALDOS ---
-TOKEN = (
-    os.getenv("TEL_TOKEN") 
-    or os.getenv("TELEGRAM_TOKEN") 
-    or os.getenv("TOKEN") 
-    or ""
-)
-
-API_KEY = (
-    os.getenv("BIT_API_KEY") 
-    or os.getenv("BITGET_API_KEY") 
-    or os.getenv("API_KEY") 
-    or ""
-)
-
-SECRET_KEY = (
-    os.getenv("BIT_SECRET_KEY") 
-    or os.getenv("BITGET_SECRET_KEY") 
-    or os.getenv("SECRET_KEY") 
-    or os.getenv("SECRET") 
-    or ""
-)
-
-PASSPHRASE = (
-    os.getenv("BIT_PASSPHRASE") 
-    or os.getenv("BITGET_PASSPHRASE") 
-    or os.getenv("PASSPHRASE") 
-    or os.getenv("PASS") 
-    or ""
-)
+TOKEN = os.getenv("TEL_TOKEN") or os.getenv("TELEGRAM_TOKEN") or os.getenv("TOKEN") or ""
+API_KEY = os.getenv("BIT_API_KEY") or os.getenv("BITGET_API_KEY") or os.getenv("API_KEY") or ""
+SECRET_KEY = os.getenv("BIT_SECRET_KEY") or os.getenv("BITGET_SECRET_KEY") or os.getenv("SECRET_KEY") or os.getenv("SECRET") or ""
+PASSPHRASE = os.getenv("BIT_PASSPHRASE") or os.getenv("BITGET_PASSPHRASE") or os.getenv("PASSPHRASE") or os.getenv("PASS") or ""
 
 print(f"--- DIAGNÓSTICO DE CREDENCIALES ---")
 print(f"TOKEN longitud: {len(TOKEN)}")
@@ -465,4 +438,9 @@ def iniciar_bot_hilo():
         inicializar_mercados()
         threading.Thread(target=bucle_keep_alive, daemon=True).start()
         threading.Thread(target=bucle_alertas_15m, daemon=True).start()
-        threading.Thread(ta
+        threading.Thread(target=bucle_monitoreo_posiciones, daemon=True).start()
+        print("¡Hilos secundarios iniciados correctamente!")
+    except Exception as e:
+        print(f"Error al iniciar hilos: {e}")
+
+if __name__ == '__main__'
