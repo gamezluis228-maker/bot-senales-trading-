@@ -8,8 +8,20 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# --- CARGA AUTOMÁTICA DE VARIABLES DESDE RENDER ---
-# Buscamos entre los nombres más comunes para evitar cualquier error de coincidencia:
+# --- CARGAR AUTOMÁTICO DESDE SECRET FILES DE RENDER ---
+ruta_secret_file = "/etc/secrets/.env"
+if os.path.exists(ruta_secret_file):
+    try:
+        with open(ruta_secret_file, "r") as f:
+            for linea in f:
+                if "=" in linea and not linea.strip().startswith("#"):
+                    k, v = linea.strip().split("=", 1)
+                    os.environ[k.strip()] = v.strip().strip("'\"")
+        print("¡Archivo secreto cargado desde /etc/secrets/.env exitosamente!")
+    except Exception as e:
+        print(f"Error al leer secret file: {e}")
+
+# --- CARGA DE VARIABLES Y RESPALDOS ---
 TOKEN = (
     os.getenv("TELEGRAM_TOKEN") 
     or os.getenv("TOKEN") 
@@ -457,13 +469,3 @@ def iniciar_bot_hilo():
         try:
             bot.remove_webhook()
             print("🤖 Bot conectado y escuchando comandos de Telegram...")
-            bot.infinity_polling(skip_pending=True, timeout=60, long_polling_timeout=60)
-        except Exception as e:
-            print(f"⚠️ Polling detenido: {e}. Reiniciando...")
-            time.sleep(5)
-
-if __name__ == "__main__":
-    threading.Thread(target=iniciar_bot_hilo, daemon=True).start()
-
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
