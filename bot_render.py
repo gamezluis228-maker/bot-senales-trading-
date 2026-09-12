@@ -28,29 +28,30 @@ if os.path.exists(secrets_dir):
 
 # --- CARGA DE VARIABLES Y RESPALDOS ---
 TOKEN = (
-    os.getenv("TELEGRAM_TOKEN") 
+    os.getenv("TEL_TOKEN") 
+    or os.getenv("TELEGRAM_TOKEN") 
     or os.getenv("TOKEN") 
-    or os.getenv("TEL_TOKEN") 
     or ""
 )
 
 API_KEY = (
-    os.getenv("BITGET_API_KEY") 
-    or os.getenv("BIT_API_KEY") 
+    os.getenv("BIT_API_KEY") 
+    or os.getenv("BITGET_API_KEY") 
     or os.getenv("API_KEY") 
     or ""
 )
 
 SECRET_KEY = (
-    os.getenv("BITGET_SECRET_KEY") 
-    or os.getenv("BIT_SECRET_KEY") 
+    os.getenv("BIT_SECRET_KEY") 
+    or os.getenv("BITGET_SECRET_KEY") 
     or os.getenv("SECRET_KEY") 
     or os.getenv("SECRET") 
     or ""
 )
 
 PASSPHRASE = (
-    os.getenv("BITGET_PASSPHRASE") 
+    os.getenv("BIT_PASSPHRASE") 
+    or os.getenv("BITGET_PASSPHRASE") 
     or os.getenv("PASSPHRASE") 
     or os.getenv("PASS") 
     or ""
@@ -310,7 +311,6 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, tipo_orden='market
         if mercado == 'swap':
             sl = precio_ejecucion * 0.96 if side == 'buy' else precio_ejecucion * 1.04
             tp = precio_ejecucion * 1.08 if side == 'buy' else precio_ejecucion * 0.92
-            # Corrección de parámetros para Bitget (evita enviar stopLossPrice y takeProfitPrice juntos si la API exige un formato específico o sólo uno)
             params['stopLossPrice'] = ex.price_to_precision(market_symbol, sl)
             params['tradeSide'] = position_side
 
@@ -463,4 +463,6 @@ def iniciar_bot_hilo():
     time.sleep(3)
     try:
         inicializar_mercados()
-        threading.Thread(target=bucle_keep_alive, da
+        threading.Thread(target=bucle_keep_alive, daemon=True).start()
+        threading.Thread(target=bucle_alertas_15m, daemon=True).start()
+        threading.Thread(ta
