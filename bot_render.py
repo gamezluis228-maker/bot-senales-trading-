@@ -391,14 +391,14 @@ def callback_query(call):
                     InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
                 )
                 bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, parse_mode="Markdown")
-                    else:
-            bot.answer_callback_query(call.id, "Selecciona zona para orden Límite...")
-            m_zona = InlineKeyboardMarkup(row_width=2)
-            m_zona.add(
-                InlineKeyboardButton("🟢 Comprar en Soporte", callback_data=f"ejec_fut_{coin}_{lev}_limit_soporte_10"),
-                InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_fut_{coin}_{lev}_limit_resistencia_10")
-            )
-            bot.send_message(call.message.chat.id, f"🎯 **Elige zona para orden Límite de {coin} ({lev}x):**\n\n*Nota: Se usarán $10 de margen por defecto para el cálculo.*", reply_markup=m_zona, parse_mode="Markdown")
+   else:
+    bot.answer_callback_query(call.id, "Selecciona zona para orden Límite...")
+    m_zona = InlineKeyboardMarkup(row_width=2)
+    m_zona.add(
+        InlineKeyboardButton("🟢 Comprar en Soporte", callback_data=f"ejec_fut_{coin}_{lev}_limit_soporte_10"),
+        InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_fut_{coin}_{lev}_limit_resistencia_10")
+    )
+    bot.send_message(call.message.chat.id, f"🎯 **Elige zona para orden Límite de {coin} ({lev}x):**\n\n*Nota: Se usarán $10 de margen por defecto para el cálculo.*", reply_markup=m_zona, parse_mode="Markdown")
 
     elif accion == "ejec" and len(datos) >= 7:
         mercado_tipo = datos[1]
