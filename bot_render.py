@@ -559,6 +559,8 @@ def iniciar_hilos():
     hilo_keep_alive.start()
     hilo_reportes = threading.Thread(target=bucle_reportes_automaticos, daemon=True)
     hilo_reportes.start()
+    hilo_monitoreo = threading.Thread(target=bucle_monitoreo_ordenes, daemon=True)
+    hilo_monitoreo.start()
 
 if __name__ == "__main__":
     print("Iniciando Bot...")
