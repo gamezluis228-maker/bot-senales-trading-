@@ -32,7 +32,7 @@ bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
 ULTIMO_CHAT_ID = 7115547861
-ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0, "ETH": 0, "SOL": 0, "XRP": 0, "DOGE": 0}
+ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
 
 def obtener_credenciales_bitget():
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
@@ -132,8 +132,8 @@ def obtener_analisis_bitget(symbol, mercado='swap'):
             "tendencia_15m": "ALCISTA 🟢" if closes_15m[-1] > closes_15m[-10] else "BAJISTA 🔴",
             "adx_15m": round(adx_15m, 1),
             "rsi_15m": round(calcular_rsi(closes_15m), 1),
-            "resistencia": max(highs_1h[-10:]),
-            "soporte": min(lows_1h[-10:]),
+            "resistencia": round(float(max(highs_1h[-10:])), 2),
+            "soporte": round(float(min(lows_1h[-10:])), 2),
             "estado": estado_mercado,
             "pausa": pausa_texto
         }
@@ -148,7 +148,6 @@ def obtener_analisis_pnt():
         if market_symbol in ex_bico.markets:
             ticker = ex_bico.fetch_ticker(market_symbol)
             precio_actual = float(ticker['last'])
-            cambio_24h = float(ticker.get('percentage', 0.0) or 0.0)
             ohlcv_1h = ex_bico.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
             closes_1h, highs_1h, lows_1h = [x[4] for x in ohlcv_1h], [x[2] for x in ohlcv_1h], [x[3] for x in ohlcv_1h]
             ohlcv_15m = ex_bico.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
@@ -157,18 +156,26 @@ def obtener_analisis_pnt():
             tendencia_15m = "ALCISTA 🟢" if closes_15m[-1] > closes_15m[-10] else "BAJISTA 🔴"
             tendencia_1h = "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴"
             estado_mercado = "MERCADO LATERAL / RANGO EN 15M (ADX < 20)" if adx_15m < 20 else "TENDENCIA ACTIVA EN 15M"
+            pausa_texto = "Estructura de 15m con fuerza tendencial." if adx_15m > 20 else "Precaución: Rango plano en corto plazo."
             return {
-                "precio": precio_actual, "tendencia_1h": tendencia_1h, "adx_1h": round(calcular_adx(highs_1h, lows_1h, closes_1h), 1), "rsi_1h": round(calcular_rsi(closes_1h), 1),
-                "tendencia_15m": tendencia_15m, "adx_15m": round(adx_15m, 1), "rsi_15m": round(calcular_rsi(closes_15m), 1),
-                "resistencia": float(max(highs_1h[-10:])), "soporte": float(min(lows_1h[-10:])),
-                "estado": estado_mercado, "pausa": f"Red Biconomy (Cambio 24h: {cambio_24h:+.2f}%)"
+                "precio": precio_actual, 
+                "tendencia_1h": tendencia_1h, 
+                "adx_1h": round(calcular_adx(highs_1h, lows_1h, closes_1h), 1), 
+                "rsi_1h": round(calcular_rsi(closes_1h), 1),
+                "tendencia_15m": tendencia_15m, 
+                "adx_15m": round(adx_15m, 1), 
+                "rsi_15m": round(calcular_rsi(closes_15m), 1),
+                "resistencia": round(float(max(highs_1h[-10:])), 6), 
+                "soporte": round(float(min(lows_1h[-10:])), 6),
+                "estado": estado_mercado, 
+                "pausa": pausa_texto
             }
     except Exception as e:
         print(f"Error conectando a Biconomy: {e}")
     return {
-        "precio": 0.367831, "tendencia_1h": "BAJISTA 🔴", "adx_1h": 30.0, "rsi_1h": 25.0,
-        "tendencia_15m": "BAJISTA 🔴", "adx_15m": 42.0, "rsi_15m": 17.0,
-        "resistencia": 0.3852, "soporte": 0.3669, "estado": "RANGO", "pausa": "Biconomy Respaldo"
+        "precio": 0.364638, "tendencia_1h": "BAJISTA 🔴", "adx_1h": 25.4, "rsi_1h": 24.5,
+        "tendencia_15m": "BAJISTA 🔴", "adx_15m": 12.1, "rsi_15m": 51.3,
+        "resistencia": 0.393809, "soporte": 0.335467, "estado": "RANGO", "pausa": "Biconomy Respaldo"
     }
 
 def bucle_reportes_automaticos():
@@ -178,19 +185,27 @@ def bucle_reportes_automaticos():
             tiempo_actual = time.localtime()
             if tiempo_actual.tm_min in [0, 15, 30, 45]:
                 now_ts = time.time()
-                for coin in ["PNT", "BTC", "ETH", "ZEC", "SOL", "XRP", "DOGE"]:
+                for coin in ["BTC", "ZEC", "PNT"]:
                     if now_ts - ultimos_timestamps.get(coin, 0) > 800:
                         ultimos_timestamps[coin] = now_ts
                         if coin == "PNT":
                             a = obtener_analisis_pnt()
-                            rep = "🔔 **REPORTE AUTOMÁTICO** 🔔\n🌐 PNT/USDT\n\n💵 Precio: $" + str(a['precio']) + \
-                                  "\n📊 1H: " + a['tendencia_1h'] + " | ADX: " + str(a['adx_1h']) + \
-                                  "\n📈 15M: " + a['tendencia_15m'] + " | ADX: " + str(a['adx_15m'])
+                            titulo_activo = "SPOT BICONOMY: PNT/USDT"
                         else:
                             a = obtener_analisis_bitget(coin, 'swap')
-                            rep = "🔔 **REPORTE AUTOMÁTICO** 🔔\n⚡ " + coin + "/USDT\n\n💵 Precio: $" + str(a['precio']) + \
-                                  "\n📊 1H: " + a['tendencia_1h'] + " | ADX: " + str(a['adx_1h']) + \
-                                  "\n📈 15M: " + a['tendencia_15m'] + " | ADX: " + str(a['adx_15m'])
+                            titulo_activo = f"Activo: {coin}/USDT"
+
+                        rep = (
+                            "🔔 REPORTE AUTOMÁTICO CIERRE 15M / 1H 🔔\n"
+                            f"⚡ {titulo_activo}\n\n"
+                            f"💵 Precio Actual: ${a['precio']}\n\n"
+                            f"📊 MACRO (1H): {a['tendencia_1h']} | ADX: {a['adx_1h']} | RSI: {a['rsi_1h']}\n"
+                            f"📈 CORTO PLAZO (15M): {a['tendencia_15m']} | ADX: {a['adx_15m']} | RSI: {a['rsi_15m']}\n\n"
+                            f"🧱 Resistencia: ${a['resistencia']}\n"
+                            f"🟡 Soporte: ${a['soporte']}\n\n"
+                            f"🎯 SEÑAL:\n• {a['estado']}\n• {a['pausa']}"
+                        )
+
                         if ULTIMO_CHAT_ID:
                             bot.send_message(ULTIMO_CHAT_ID, rep, parse_mode="Markdown")
                 time.sleep(60)
@@ -257,9 +272,18 @@ def callback_query(call):
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
             analisis = obtener_analisis_pnt() if coin == "PNT" else obtener_analisis_bitget(coin, 'swap')
-            rep = "🔔 **REPORTE TÉCNICO** 🔔\n⚡ Activo: " + coin + "/USDT\n\n💵 Precio: $" + str(analisis['precio']) + \
-                  "\n📊 1H: " + analisis['tendencia_1h'] + " | RSI: " + str(analisis['rsi_1h']) + \
-                  "\n📈 15M: " + analisis['tendencia_15m'] + " | RSI: " + str(analisis['rsi_15m'])
+            
+            titulo_activo = f"SPOT BICONOMY: {coin}/USDT" if coin == "PNT" else f"Activo: {coin}/USDT"
+            rep = (
+                "🔔 REPORTE TÉCNICO 🔔\n"
+                f"⚡ {titulo_activo}\n\n"
+                f"💵 Precio Actual: ${analisis['precio']}\n\n"
+                f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
+                f"📈 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"🧱 Resistencia: ${analisis['resistencia']}\n"
+                f"🟡 Soporte: ${analisis['soporte']}\n\n"
+                f"🎯 SEÑAL:\n• {analisis['estado']}\n• {analisis['pausa']}"
+            )
             bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
 
         elif call.data == "menu_futuros":
