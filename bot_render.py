@@ -269,7 +269,6 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
                 precio_objetivo = resistencia
                 side = 'sell'
 
-        # Stop Loss fijo de 4% y Take Profit de 8%
         if side == 'buy':
             stop_loss = round(precio_objetivo * 0.96, 4)
             take_profit = round(precio_objetivo * 1.08, 4)
@@ -391,4 +390,6 @@ def callback_query(call):
                     InlineKeyboardButton("$10", callback_data=f"ejec_fut_{coin}_{lev}_market_none_10"),
                     InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
                 )
-                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, p
+                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, parse_mode="Markdown")
+            else:
+           
