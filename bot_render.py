@@ -8,6 +8,7 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+# Carga de secretos desde entorno seguro (Render / etc.)
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
     try:
@@ -190,10 +191,10 @@ def bucle_reportes_automaticos():
                         ultimos_timestamps[coin] = now_ts
                         if coin == "PNT":
                             a = obtener_analisis_pnt()
-                            titulo_activo = "SPOT BICONOMY: PNT/USDT"
+                            titulo_activo = "SPOT BICONOMY: PNT/USDT (Solo Lectura)"
                         else:
                             a = obtener_analisis_bitget(coin, 'swap')
-                            titulo_activo = f"Activo: {coin}/USDT"
+                            titulo_activo = f"Activo Bitget: {coin}/USDT"
 
                         rep = (
                             "🔔 REPORTE AUTOMÁTICO CIERRE 15M / 1H 🔔\n"
@@ -225,7 +226,7 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🔵 XRP", callback_data="ver_XRP"),
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
         InlineKeyboardButton("🟠 DOGE", callback_data="ver_DOGE"),
-        InlineKeyboardButton("🌐 PNT", callback_data="ver_PNT")
+        InlineKeyboardButton("🌐 PNT (Solo Info)", callback_data="ver_PNT")
     )
     bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - BITGET & BICONOMY** 🟢", reply_markup=markup, parse_mode="Markdown")
 
@@ -235,12 +236,12 @@ def menu_operar(message):
     ULTIMO_CHAT_ID = message.chat.id
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("⚡ Futuros", callback_data="menu_futuros"),
-        InlineKeyboardButton("🪙 Spot", callback_data="menu_spot")
+        InlineKeyboardButton("⚡ Futuros (Bitget)", callback_data="menu_futuros"),
+        InlineKeyboardButton("🪙 Spot (Bitget)", callback_data="menu_spot")
     )
-    bot.send_message(message.chat.id, "⚙️ **CENTRAL DE OPERACIONES** 🟢", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "⚙️ **CENTRAL DE OPERACIONES (EXCLUSIVO BITGET)** 🟢", reply_markup=markup, parse_mode="Markdown")
 
-def ejecutar_orden_con_gestion_riesgo(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
+def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
@@ -268,21 +269,33 @@ def ejecutar_orden_con_gestion_riesgo(symbol, mercado, side, margen_usdt, apalan
                 precio_objetivo = resistencia
                 side = 'sell'
 
-        # Cálculo automático de Stop Loss y Take Profit basados en soportes/resistencias
-        if side == 'buy': # Long (Compra)
-            stop_loss = round(precio_objetivo * 0.985, 4) # 1.5% abajo de protección
-            take_profit = round(precio_objetivo * 1.03, 4) # 3% arriba de ganancia
-        else: # Short (Venta)
-            stop_loss = round(precio_objetivo * 1.015, 4) # 1.5% arriba de protección
-            take_profit = round(precio_objetivo * 0.97, 4) # 3% abajo de ganancia
+        # Niveles fijos configurados: 4% Stop Loss y 8% Take Profit
+        if side == 'buy':
+            stop_loss = round(precio_objetivo * 0.96, 4)   # 4% abajo
+            take_profit = round(precio_objetivo * 1.08, 4) # 8% arriba
+        else:
+            stop_loss = round(precio_objetivo * 1.04, 4)   # 4% arriba
+            take_profit = round(precio_objetivo * 0.92, 4) # 8% abajo
 
         amount_tokens = (margen_usdt * apalancamiento) / precio_objetivo if tipo_orden == 'limit' else margen_usdt / precio_actual
-        params = {'createMarketBuyOrderRequiresPrice': False} if (tipo_orden == 'market' and side == 'buy') else {}
         
+        params = {}
+        if mercado == 'swap':
+            params = {
+                'stopLoss': {'triggerPrice': stop_loss},
+                'takeProfit': {'triggerPrice': take_profit}
+            }
+            if tipo_orden == 'market' and side == 'buy':
+                params['createMarketBuyOrderRequiresPrice'] = False
+        else:
+            if tipo_orden == 'market' and side == 'buy':
+                params = {'createMarketBuyOrderRequiresPrice': False}
+
         if tipo_orden == 'market':
             orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
         else:
-            orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), price=ex.price_to_precision(market_symbol, precio_objetivo))
+            params['price'] = ex.price_to_precision(market_symbol, precio_objetivo)
+            orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
             precio_actual = precio_objetivo
 
         return True, precio_actual, margen_usdt, apalancamiento, tipo_orden, stop_loss, take_profit, orden
@@ -311,7 +324,7 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
             analisis = obtener_analisis_pnt() if coin == "PNT" else obtener_analisis_bitget(coin, 'swap')
             
-            titulo_activo = f"SPOT BICONOMY: {coin}/USDT" if coin == "PNT" else f"Activo: {coin}/USDT"
+            titulo_activo = f"SPOT BICONOMY: {coin}/USDT (Solo Lectura)" if coin == "PNT" else f"Activo Bitget: {coin}/USDT"
             rep = (
                 "🔔 REPORTE TÉCNICO 🔔\n"
                 f"⚡ {titulo_activo}\n\n"
@@ -325,16 +338,17 @@ def callback_query(call):
             bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
 
         elif call.data == "menu_futuros":
-            bot.answer_callback_query(call.id, "Futuros...")
+            bot.answer_callback_query(call.id, "Futuros Bitget...")
             m = InlineKeyboardMarkup(row_width=2)
+            # Nota: PNT se excluye de aquí porque no se opera en Bitget mediante este bot
             m.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in ["BTC", "ETH", "SOL", "XRP", "ZEC", "DOGE"]])
-            bot.send_message(call.message.chat.id, "⚡ **Selecciona Activo para Futuros:**", reply_markup=m, parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, "⚡ **Selecciona Activo para Futuros (Bitget):**", reply_markup=m, parse_mode="Markdown")
 
         elif call.data == "menu_spot":
-            bot.answer_callback_query(call.id, "Spot...")
+            bot.answer_callback_query(call.id, "Spot Bitget...")
             m = InlineKeyboardMarkup(row_width=2)
             m.add(*[InlineKeyboardButton(f"🪙 {c}", callback_data=f"opc_spot_{c}") for c in ["BTC", "ETH", "SOL", "XRP", "ZEC", "DOGE"]])
-            bot.send_message(call.message.chat.id, "🪙 **Selecciona Activo para Spot:**", reply_markup=m, parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, "🪙 **Selecciona Activo para Spot (Bitget):**", reply_markup=m, parse_mode="Markdown")
 
         elif len(datos) == 3 and datos[0] == "opc":
             mercado_tipo, coin = datos[1], datos[2]
@@ -347,7 +361,7 @@ def callback_query(call):
                     InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
                     InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
                 )
-                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin}:**", reply_markup=m_lev, parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bitget):**", reply_markup=m_lev, parse_mode="Markdown")
             else:
                 bot.answer_callback_query(call.id, f"Margen para {coin}...")
                 m_mar = InlineKeyboardMarkup(row_width=3)
@@ -356,7 +370,7 @@ def callback_query(call):
                     InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
                     InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
                 )
-                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot Bitget {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown")
 
         elif accion == "lev" and len(datos) == 3:
             coin, lev = datos[1], int(datos[2])
@@ -376,12 +390,4 @@ def callback_query(call):
                 m_mar.add(
                     InlineKeyboardButton("$5", callback_data=f"ejec_fut_{coin}_{lev}_market_none_5"),
                     InlineKeyboardButton("$10", callback_data=f"ejec_fut_{coin}_{lev}_market_none_10"),
-                    InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
-                )
-                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, parse_mode="Markdown")
-            else:
-                bot.answer_callback_query(call.id, "Selecciona zona operativa...")
-                m_zona = InlineKeyboardMarkup(row_width=2)
-                m_zona.add(
-                    InlineKeyboardButton("🟡 Operar en Soporte (Long)", callback_data=f"zona_fut_{coin}_{lev}_soporte"),
-                    InlineKeyboardButton("🧱 Operar en Resistencia (Short)"
+                    InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin
