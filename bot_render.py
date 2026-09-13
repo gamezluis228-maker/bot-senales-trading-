@@ -218,8 +218,7 @@ def bucle_reportes_automaticos():
         except Exception as e:
             print(f"Error en bucle automático: {e}")
         time.sleep(15)
-
-@bot.message_handler(commands=['start', 'menu'])
+      @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -362,8 +361,7 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         else:
             mensaje_amigable = f"❌ **Error en Bitget:** {error_str}"
         return False, 0, 0, 0, 0, 0, 0, mensaje_amigable
-
-@bot.callback_query_handler(func=lambda call: True)
+      @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = call.message.chat.id
@@ -405,25 +403,36 @@ def callback_query(call):
 
         elif len(datos) == 3 and datos[0] == "opc":
             mercado_tipo, coin = datos[1], datos[2]
-        if mercado_tipo == "fut":
-           bot.answer_callback_query(call.id, f"Apalancamiento para {coin}...")
-        m_lev = InlineKeyboardMarkup(row_width=3)
-    m_lev.add(
-        InlineKeyboardButton("1x", callback_data=f"lev_{coin}_1"),
-        InlineKeyboardButton("5x", callback_data=f"lev_{coin}_5"),
-        InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
-        InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
-    )
-    bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bitget):**", reply_markup=m_lev, parse_mode="Markdown")
-elif accion == "lev" and len(datos) == 3:
-    bot.answer_callback_query(call.id, f"Margen para {coin}...")
-    m_mar = InlineKeyboardMarkup(row_width=3)
-    m_mar.add(
-        InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
-        InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
-        InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
-    )
-    bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot Bitget {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown") 
+            if mercado_tipo == "fut":
+                bot.answer_callback_query(call.id, f"Apalancamiento para {coin}...")
+                m_lev = InlineKeyboardMarkup(row_width=3)
+                m_lev.add(
+                    InlineKeyboardButton("1x", callback_data=f"lev_{coin}_1"),
+                    InlineKeyboardButton("5x", callback_data=f"lev_{coin}_5"),
+                    InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
+                    InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
+                )
+                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bitget):**", reply_markup=m_lev, parse_mode="Markdown")
+            else:
+                bot.answer_callback_query(call.id, f"Margen para {coin}...")
+                m_mar = InlineKeyboardMarkup(row_width=3)
+                m_mar.add(
+                    InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
+                    InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
+                    InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
+                )
+                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot Bitget {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown")
+
+        elif accion == "lev" and len(datos) == 3:
+            coin, lev = datos[1], int(datos[2])
+            bot.answer_callback_query(call.id, f"Tipo de orden para {coin}...")
+            m_tipo = InlineKeyboardMarkup(row_width=2)
+            m_tipo.add(
+                InlineKeyboardButton("🚀 Mercado (Instantánea)", callback_data=f"tipo_fut_{coin}_{lev}_market"),
+                InlineKeyboardButton("⏳ Límite (Precio Objetivo)", callback_data=f"tipo_fut_{coin}_{lev}_limit")
+            )
+            bot.send_message(call.message.chat.id, f"⚙️ **Selecciona el Tipo de Orden para {coin} ({lev}x):**", reply_markup=m_tipo, parse_mode="Markdown")
+
         elif accion == "tipo" and len(datos) == 5:
             coin, lev, tipo_o = datos[2], int(datos[3]), datos[4]
             if tipo_o == "market":
@@ -490,7 +499,7 @@ elif accion == "lev" and len(datos) == 3:
         else:
             bot.answer_callback_query(call.id, "Opción no reconocida.")
             
-  except Exception as e:
+    except Exception as e:
         print(f"Error en callback: {e}")
         bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
 
@@ -506,3 +515,4 @@ if __name__ == "__main__":
     iniciar_hilos()
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=puerto)
+      
