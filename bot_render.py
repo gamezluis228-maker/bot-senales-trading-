@@ -530,6 +530,17 @@ def callback_query(call):
             if exito:
                 direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
                 modo_texto = "🧪 **MODO DEMO (SIMULACIÓN)**" if MODO_DEMO else "✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅"
+                    if not MODO_DEMO:
+                        ordenes_abiertas.append({
+                            'id': resultado.get('id'),
+                            'coin': coin,
+                            'mercado': mercado_ccxt,
+                            'market_symbol': f"{coin}/USDT:USDT" if mercado_ccxt == 'swap' else f"{coin}/USDT",
+                            'side': 'buy' if zona in ['none', 'soporte'] else 'sell',
+                            'precio_entrada': precio,
+                            'margen': margen_usado,
+                            'apalancamiento': lev_usado
+                        })
                 rep = (
                     f"{modo_texto}\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
