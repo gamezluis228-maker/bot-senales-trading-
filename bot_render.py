@@ -8,7 +8,7 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Carga de secretos desde entorno seguro (Render / etc.)
+# Carga de secretos desde entorno seguro
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
     try:
@@ -269,13 +269,13 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
                 precio_objetivo = resistencia
                 side = 'sell'
 
-        # Niveles fijos configurados: 4% Stop Loss y 8% Take Profit
+        # Stop Loss fijo de 4% y Take Profit de 8%
         if side == 'buy':
-            stop_loss = round(precio_objetivo * 0.96, 4)   # 4% abajo
-            take_profit = round(precio_objetivo * 1.08, 4) # 8% arriba
+            stop_loss = round(precio_objetivo * 0.96, 4)
+            take_profit = round(precio_objetivo * 1.08, 4)
         else:
-            stop_loss = round(precio_objetivo * 1.04, 4)   # 4% arriba
-            take_profit = round(precio_objetivo * 0.92, 4) # 8% abajo
+            stop_loss = round(precio_objetivo * 1.04, 4)
+            take_profit = round(precio_objetivo * 0.92, 4)
 
         amount_tokens = (margen_usdt * apalancamiento) / precio_objetivo if tipo_orden == 'limit' else margen_usdt / precio_actual
         
@@ -340,7 +340,6 @@ def callback_query(call):
         elif call.data == "menu_futuros":
             bot.answer_callback_query(call.id, "Futuros Bitget...")
             m = InlineKeyboardMarkup(row_width=2)
-            # Nota: PNT se excluye de aquí porque no se opera en Bitget mediante este bot
             m.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in ["BTC", "ETH", "SOL", "XRP", "ZEC", "DOGE"]])
             bot.send_message(call.message.chat.id, "⚡ **Selecciona Activo para Futuros (Bitget):**", reply_markup=m, parse_mode="Markdown")
 
@@ -390,4 +389,6 @@ def callback_query(call):
                 m_mar.add(
                     InlineKeyboardButton("$5", callback_data=f"ejec_fut_{coin}_{lev}_market_none_5"),
                     InlineKeyboardButton("$10", callback_data=f"ejec_fut_{coin}_{lev}_market_none_10"),
-                    InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin
+                    InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
+                )
+                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, p
