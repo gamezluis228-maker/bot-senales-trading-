@@ -39,7 +39,8 @@ perdida_acumulada_dia = 0.0
 fecha_actual = time.strftime("%Y-%m-%d")
 MODO_DEMO = True
 MONTO_MINIMO_USDT = 5.0
-
+# --- RASTREO DE ÓRDENES ABIERTAS ---
+ordenes_abiertas = []
 def obtener_credenciales_bitget():
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
            os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
