@@ -240,21 +240,29 @@ def menu_operar(message):
     )
     bot.send_message(message.chat.id, "⚙️ **CENTRAL DE OPERACIONES** 🟢", reply_markup=markup, parse_mode="Markdown")
 
-def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt):
+def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt, apalancamiento=1):
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
         api, secret, _ = obtener_credenciales_bitget()
         if not api or not secret:
             return False, 0, 0, 0, "❌ **Error:** Faltan credenciales de Bitget."
+        
+        # Si es futuros, ajustamos el apalancamiento en el exchange antes de operar
+        if mercado == 'swap' and apalancamiento > 1:
+            try:
+                ex.set_leverage(apalancamiento, market_symbol)
+            except Exception as e:
+                print(f"Aviso de apalancamiento: {e}")
+
         ticker = ex.fetch_ticker(market_symbol)
         precio_actual = float(ticker['last'])
+        
         amount_tokens = margen_usdt / precio_actual
         params = {'createMarketBuyOrderRequiresPrice': False} if side == 'buy' else {}
         orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
-        sl = precio_actual * (1 - 0.08)
-        alerta_4 = precio_actual * (1 - 0.04)
-        return True, precio_actual, sl, alerta_4, orden
+        
+        return True, precio_actual, margen_usdt, apalancamiento, orden
     except Exception as e:
         return False, 0, 0, 0, f"❌ **Error en Bitget:** {str(e)}"
 
@@ -300,22 +308,53 @@ def callback_query(call):
 
         elif len(datos) == 3 and datos[0] == "opc":
             mercado_tipo, coin = datos[1], datos[2]
-            bot.answer_callback_query(call.id, f"Margen para {coin}...")
-            markup_margen = InlineKeyboardMarkup(row_width=3)
-            markup_margen.add(
-                InlineKeyboardButton("$2", callback_data=f"ejecutar_{mercado_tipo}_{coin}_2"),
-                InlineKeyboardButton("$5", callback_data=f"ejecutar_{mercado_tipo}_{coin}_5"),
-                InlineKeyboardButton("$10", callback_data=f"ejecutar_{mercado_tipo}_{coin}_10")
-            )
-            bot.send_message(call.message.chat.id, f"💵 **Elige Margen para {coin}:**", reply_markup=markup_margen, parse_mode="Markdown")
+            if mercado_tipo == "fut":
+                # Si es futuros, primero pedimos el apalancamiento
+                bot.answer_callback_query(call.id, f"Apalancamiento para {coin}...")
+                m_lev = InlineKeyboardMarkup(row_width=3)
+                m_lev.add(
+                    InlineKeyboardButton("1x", callback_data=f"lev_{coin}_1"),
+                    InlineKeyboardButton("5x", callback_data=f"lev_{coin}_5"),
+                    InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
+                    InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
+                )
+                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin}:**", reply_markup=m_lev, parse_mode="Markdown")
+            else:
+                # Si es spot, salta directo al margen
+                bot.answer_callback_query(call.id, f"Margen para {coin}...")
+                m_mar = InlineKeyboardMarkup(row_width=3)
+                m_mar.add(
+                    InlineKeyboardButton("$2", callback_data=f"ejec_spot_{coin}_1_2"),
+                    InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_5"),
+                    InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_10")
+                )
+                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot {coin}:**", reply_markup=m_mar, parse_mode="Markdown")
 
-        elif accion == "ejecutar" and len(datos) >= 4:
-            mercado_tipo, coin, margen = datos[1], datos[2], float(datos[3])
+        elif accion == "lev" and len(datos) == 3:
+            coin, lev = datos[1], int(datos[2])
+            bot.answer_callback_query(call.id, f"Apalancamiento {lev}x seleccionado...")
+            m_mar = InlineKeyboardMarkup(row_width=3)
+            m_mar.add(
+                InlineKeyboardButton("$2", callback_data=f"ejec_fut_{coin}_{lev}_2"),
+                InlineKeyboardButton("$5", callback_data=f"ejec_fut_{coin}_{lev}_5"),
+                InlineKeyboardButton("$10", callback_data=f"ejec_fut_{coin}_{lev}_10")
+            )
+            bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Futuros {coin} ({lev}x):**", reply_markup=m_mar, parse_mode="Markdown")
+
+        elif accion == "ejec" and len(datos) >= 5:
+            mercado_tipo, coin, lev, margen = datos[1], datos[2], int(datos[3]), float(datos[4])
             mercado_key = 'swap' if mercado_tipo == 'fut' else 'spot'
-            bot.answer_callback_query(call.id, "Ejecutando orden...")
-            exito, precio_ejec, sl_precio, alerta_4, resultado = ejecutar_orden_bitget(coin, mercado_key, 'buy', margen)
+            bot.answer_callback_query(call.id, "Ejecutando orden a mercado...")
+            exito, precio_ejec, margen_val, lev_val, resultado = ejecutar_orden_bitget(coin, mercado_key, 'buy', margen, lev)
             if exito:
-                msg = "✅ **¡ORDEN EJECUTADA!** ✅\n\n🔹 Activo: " + coin + " (" + mercado_key.upper() + ")\n💵 Margen: $" + str(margen) + " USDT\n💰 Entrada: $" + str(precio_ejec) + "\n🛡️ SL: $" + str(sl_precio)
+                msg = (
+                    "✅ **¡ORDEN A MERCADO EJECUTADA!** ✅\n\n"
+                    f"🔹 Activo: {coin} ({mercado_key.upper()})\n"
+                    f"⚙️ Apalancamiento: {lev_val}x\n"
+                    f"💵 Margen Invertido: ${margen_val} USDT\n"
+                    f"💰 Precio de Ejecución: ${precio_ejec}\n\n"
+                    "🎯 **Estado:** Posición abierta exitosamente a precio de mercado."
+                )
                 bot.send_message(call.message.chat.id, msg, parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, str(resultado), parse_mode="Markdown")
