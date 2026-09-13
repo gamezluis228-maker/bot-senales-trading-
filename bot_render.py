@@ -221,9 +221,9 @@ def bucle_reportes_automaticos():
         time.sleep(15)
     def bucle_monitoreo_ordenes():
         time.sleep(30)
-    while True:
-        try:
-            if ordenes_abiertas:
+while True:
+    try:
+        if ordenes_abiertas:
                 for orden_info in ordenes_abiertas[:]:
                     try:
                         ex = crear_instancia_exchange(orden_info['mercado'])
@@ -267,7 +267,7 @@ def bucle_reportes_automaticos():
                         print(f"Error monitoreando orden {orden_info.get('id', '?')}: {e}")
         except Exception as e:
             print(f"Error en bucle de monitoreo: {e}")
-        time.sleep(180)
+    time.sleep(180)
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
