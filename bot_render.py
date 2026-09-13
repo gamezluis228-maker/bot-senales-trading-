@@ -352,7 +352,7 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         return True, precio_actual, margen_usdt, apalancamiento, tipo_orden, stop_loss, take_profit, orden
     except Exception as e:
         error_str = str(e)
-        global perdida_acumulada_dia
+        
         perdida_acumulada_dia += 1.0
         if "45110" in error_str or "minimum amount" in error_str:
             mensaje_amigable = "❌ **Error en Bitget:** El monto es menor al mínimo permitido (Mínimo requerido: 5 USDT)."
