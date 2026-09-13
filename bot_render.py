@@ -39,12 +39,10 @@ perdida_acumulada_dia = 0.0
 fecha_actual = time.strftime("%Y-%m-%d")
 MODO_DEMO = False
 MONTO_MINIMO_USDT = 5.0
-# --- RASTREO DE ÓRDENES ABIERTAS ---
+
 ordenes_abiertas = []
+
 def obtener_credenciales_bitget():
-    print(f"DIAGNÓSTICO - API: {'SÍ' if os.getenv('BITGET_API_KEY') else 'NO'}") 
-    print(f"DIAGNÓSTICO - SECRET: {'SÍ' if os.getenv('BITGET_SECRET_KEY') else 'NO'}")
-    print(f"DIAGNÓSTICO - PASS: {'SÍ' if os.getenv('BITGET_PASSPHRASE') else 'NO'}")
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
            os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
            os.getenv("BIT_KEY") or os.getenv("BITGET_API") or "")
@@ -222,55 +220,6 @@ def bucle_reportes_automaticos():
         except Exception as e:
             print(f"Error en bucle automático: {e}")
         time.sleep(15)
-    def bucle_monitoreo_ordenes():
-        time.sleep(30)
-while True:
-    try:
-        if ordenes_abiertas:
-                for orden_info in ordenes_abiertas[:]:
-                    try:
-                        ex = crear_instancia_exchange(orden_info['mercado'])
-                        market_symbol = orden_info['market_symbol']
-                        orden_actual = ex.fetch_order(orden_info['id'], market_symbol)
-                        estado = orden_actual.get('status', 'open')
-                        
-                        if estado in ['closed', 'canceled', 'filled']:
-                            precio_entrada = orden_info['precio_entrada']
-                            precio_actual = orden_actual.get('price', 0) or orden_actual.get('average', 0) or precio_entrada
-                            lado = orden_info['side']
-                            margen = orden_info['margen']
-                            apalancamiento = orden_info['apalancamiento']
-                            
-                            if lado == 'buy':
-                                pnl_pct = ((precio_actual - precio_entrada) / precio_entrada) * 100
-                            else:
-                                pnl_pct = ((precio_entrada - precio_actual) / precio_entrada) * 100
-                            
-                            pnl_usdt = margen * apalancamiento * (pnl_pct / 100)
-                            emoji_resultado = "🟢 GANANCIA" if pnl_usdt > 0 else "🔴 PÉRDIDA"
-                            
-                            reporte = (
-                                f"🎯 **OPERACIÓN CERRADA** 🎯\n\n"
-                                f"🪙 **Activo:** {orden_info['coin']}/USDT\n"
-                                f"⚙️ **Mercado:** {'Futuros' if orden_info['mercado'] == 'swap' else 'Spot'}\n"
-                                f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if lado == 'buy' else 'VENTA (SHORT) 🔴'}\n"
-                                f"💵 **Precio Entrada:** ${precio_entrada}\n"
-                                f"💵 **Precio Salida:** ${precio_actual}\n"
-                                f"💰 **Margen:** ${margen} USDT\n"
-                                f"⚡ **Apalancamiento:** {apalancamiento}x\n\n"
-                                f"{emoji_resultado}: **${pnl_usdt:.2f} USDT** ({pnl_pct:+.2f}%)\n\n"
-                                f"🆔 **ID:** `{orden_info['id']}`"
-                            )
-                            
-                            if ULTIMO_CHAT_ID:
-                                bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
-                            
-                            ordenes_abiertas.remove(orden_info)
-                    except Exception as e:
-                        print(f"Error monitoreando orden {orden_info.get('id', '?')}: {e}")
-        except Exception as e:
-            print(f"Error en bucle de monitoreo: {e}")
-    time.sleep(180)
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
@@ -405,7 +354,6 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         return True, precio_actual, margen_usdt, apalancamiento, tipo_orden, stop_loss, take_profit, orden
     except Exception as e:
         error_str = str(e)
-        
         perdida_acumulada_dia += 1.0
         if "45110" in error_str or "minimum amount" in error_str:
             mensaje_amigable = "❌ **Error en Bitget:** El monto es menor al mínimo permitido (Mínimo requerido: 5 USDT)."
@@ -415,6 +363,55 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             mensaje_amigable = f"❌ **Error en Bitget:** {error_str}"
         return False, 0, 0, 0, 0, 0, 0, mensaje_amigable
 
+def bucle_monitoreo_ordenes():
+    time.sleep(30)
+    while True:
+        try:
+            if ordenes_abiertas:
+                for orden_info in ordenes_abiertas[:]:
+                    try:
+                        ex = crear_instancia_exchange(orden_info['mercado'])
+                        market_symbol = orden_info['market_symbol']
+                        orden_actual = ex.fetch_order(orden_info['id'], market_symbol)
+                        estado = orden_actual.get('status', 'open')
+                        
+                        if estado in ['closed', 'canceled', 'filled']:
+                            precio_entrada = orden_info['precio_entrada']
+                            precio_actual = orden_actual.get('price', 0) or orden_actual.get('average', 0) or precio_entrada
+                            lado = orden_info['side']
+                            margen = orden_info['margen']
+                            apalancamiento = orden_info['apalancamiento']
+                            
+                            if lado == 'buy':
+                                pnl_pct = ((precio_actual - precio_entrada) / precio_entrada) * 100
+                            else:
+                                pnl_pct = ((precio_entrada - precio_actual) / precio_entrada) * 100
+                            
+                            pnl_usdt = margen * apalancamiento * (pnl_pct / 100)
+                            emoji_resultado = "🟢 GANANCIA" if pnl_usdt > 0 else "🔴 PÉRDIDA"
+                            
+                            reporte = (
+                                f"🎯 **OPERACIÓN CERRADA** 🎯\n\n"
+                                f"🪙 **Activo:** {orden_info['coin']}/USDT\n"
+                                f"⚙️ **Mercado:** {'Futuros' if orden_info['mercado'] == 'swap' else 'Spot'}\n"
+                                f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if lado == 'buy' else 'VENTA (SHORT) 🔴'}\n"
+                                f"💵 **Precio Entrada:** ${precio_entrada}\n"
+                                f"💵 **Precio Salida:** ${precio_actual}\n"
+                                f"💰 **Margen:** ${margen} USDT\n"
+                                f"⚡ **Apalancamiento:** {apalancamiento}x\n\n"
+                                f"{emoji_resultado}: **${pnl_usdt:.2f} USDT** ({pnl_pct:+.2f}%)\n\n"
+                                f"🆔 **ID:** `{orden_info['id']}`"
+                            )
+                            
+                            if ULTIMO_CHAT_ID:
+                                bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+                            
+                            ordenes_abiertas.remove(orden_info)
+                    except Exception as e:
+                        print(f"Error monitoreando orden {orden_info.get('id', '?')}: {e}")
+        except Exception as e:
+            print(f"Error en bucle de monitoreo: {e}")
+        time.sleep(180)     
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     global ULTIMO_CHAT_ID
@@ -531,19 +528,19 @@ def callback_query(call):
             bot.delete_message(call.message.chat.id, msg_espera.message_id)
 
             if exito:
-               direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
-               modo_texto = "🧪 **MODO DEMO (SIMULACIÓN)**" if MODO_DEMO else "✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅"
-                    if not MODO_DEMO:
-                        ordenes_abiertas.append({
-                            'id': resultado.get('id'),
-                            'coin': coin,
-                            'mercado': mercado_ccxt,
-                            'market_symbol': f"{coin}/USDT:USDT" if mercado_ccxt == 'swap' else f"{coin}/USDT",
-                            'side': 'buy' if zona in ['none', 'soporte'] else 'sell',
-                            'precio_entrada': precio,
-                            'margen': margen_usado,
-                            'apalancamiento': lev_usado
-                        })
+                direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
+                modo_texto = "🧪 **MODO DEMO (SIMULACIÓN)**" if MODO_DEMO else "✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅"
+                if not MODO_DEMO:
+                    ordenes_abiertas.append({
+                        'id': resultado.get('id'),
+                        'coin': coin,
+                        'mercado': mercado_ccxt,
+                        'market_symbol': f"{coin}/USDT:USDT" if mercado_ccxt == 'swap' else f"{coin}/USDT",
+                        'side': 'buy' if zona in ['none', 'soporte'] else 'sell',
+                        'precio_entrada': precio,
+                        'margen': margen_usado,
+                        'apalancamiento': lev_usado
+                    })
                 rep = (
                     f"{modo_texto}\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
@@ -564,9 +561,9 @@ def callback_query(call):
         else:
             bot.answer_callback_query(call.id, "Opción no reconocida.")
             
-except Exception as e:
-    print(f"Error en callback: {e}")
-    bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
+    except Exception as e:
+        print(f"Error en callback: {e}")
+        bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
 
 def iniciar_hilos():
     hilo_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
@@ -583,4 +580,4 @@ if __name__ == "__main__":
     hilo_bot = threading.Thread(target=lambda: bot.infinity_polling(), daemon=True)
     hilo_bot.start()
     puerto = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=puerto)
+    app.run(host="0.0.0.0", port=puerto)      
