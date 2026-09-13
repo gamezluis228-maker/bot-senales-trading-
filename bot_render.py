@@ -514,5 +514,7 @@ if __name__ == "__main__":
     print("Iniciando Bot...")
     inicializar_mercados()
     iniciar_hilos()
+    hilo_bot = threading.Thread(target=lambda: bot.infinity_polling(), daemon=True)
+    hilo_bot.start()
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=puerto)
