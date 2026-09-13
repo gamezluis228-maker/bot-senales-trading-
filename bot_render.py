@@ -219,6 +219,55 @@ def bucle_reportes_automaticos():
         except Exception as e:
             print(f"Error en bucle automático: {e}")
         time.sleep(15)
+        def bucle_monitoreo_ordenes():
+    time.sleep(30)
+    while True:
+        try:
+            if ordenes_abiertas:
+                for orden_info in ordenes_abiertas[:]:
+                    try:
+                        ex = crear_instancia_exchange(orden_info['mercado'])
+                        market_symbol = orden_info['market_symbol']
+                        orden_actual = ex.fetch_order(orden_info['id'], market_symbol)
+                        estado = orden_actual.get('status', 'open')
+                        
+                        if estado in ['closed', 'canceled', 'filled']:
+                            precio_entrada = orden_info['precio_entrada']
+                            precio_actual = orden_actual.get('price', 0) or orden_actual.get('average', 0) or precio_entrada
+                            lado = orden_info['side']
+                            margen = orden_info['margen']
+                            apalancamiento = orden_info['apalancamiento']
+                            
+                            if lado == 'buy':
+                                pnl_pct = ((precio_actual - precio_entrada) / precio_entrada) * 100
+                            else:
+                                pnl_pct = ((precio_entrada - precio_actual) / precio_entrada) * 100
+                            
+                            pnl_usdt = margen * apalancamiento * (pnl_pct / 100)
+                            emoji_resultado = "🟢 GANANCIA" if pnl_usdt > 0 else "🔴 PÉRDIDA"
+                            
+                            reporte = (
+                                f"🎯 **OPERACIÓN CERRADA** 🎯\n\n"
+                                f"🪙 **Activo:** {orden_info['coin']}/USDT\n"
+                                f"⚙️ **Mercado:** {'Futuros' if orden_info['mercado'] == 'swap' else 'Spot'}\n"
+                                f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if lado == 'buy' else 'VENTA (SHORT) 🔴'}\n"
+                                f"💵 **Precio Entrada:** ${precio_entrada}\n"
+                                f"💵 **Precio Salida:** ${precio_actual}\n"
+                                f"💰 **Margen:** ${margen} USDT\n"
+                                f"⚡ **Apalancamiento:** {apalancamiento}x\n\n"
+                                f"{emoji_resultado}: **${pnl_usdt:.2f} USDT** ({pnl_pct:+.2f}%)\n\n"
+                                f"🆔 **ID:** `{orden_info['id']}`"
+                            )
+                            
+                            if ULTIMO_CHAT_ID:
+                                bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+                            
+                            ordenes_abiertas.remove(orden_info)
+                    except Exception as e:
+                        print(f"Error monitoreando orden {orden_info.get('id', '?')}: {e}")
+        except Exception as e:
+            print(f"Error en bucle de monitoreo: {e}")
+        time.sleep(180)
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
