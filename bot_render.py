@@ -528,9 +528,9 @@ def callback_query(call):
             bot.delete_message(call.message.chat.id, msg_espera.message_id)
 
             if exito:
-                direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
-                modo_texto = "🧪 **MODO DEMO (SIMULACIÓN)**" if MODO_DEMO else "✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅"
-                     if not MODO_DEMO:
+               direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
+               modo_texto = "🧪 **MODO DEMO (SIMULACIÓN)**" if MODO_DEMO else "✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅"
+                    if not MODO_DEMO:
                         ordenes_abiertas.append({
                             'id': resultado.get('id'),
                             'coin': coin,
