@@ -407,7 +407,7 @@ def callback_query(call):
             mercado_tipo, coin = datos[1], datos[2]
         if mercado_tipo == "fut":
            bot.answer_callback_query(call.id, f"Apalancamiento para {coin}...")
-    m_lev = InlineKeyboardMarkup(row_width=3)
+        m_lev = InlineKeyboardMarkup(row_width=3)
     m_lev.add(
         InlineKeyboardButton("1x", callback_data=f"lev_{coin}_1"),
         InlineKeyboardButton("5x", callback_data=f"lev_{coin}_5"),
