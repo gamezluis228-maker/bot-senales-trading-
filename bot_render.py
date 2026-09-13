@@ -34,6 +34,12 @@ app = Flask(__name__)
 ULTIMO_CHAT_ID = 7115547861
 ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
 
+LIMITE_PERDIDA_DIARIA = 10.0
+perdida_acumulada_dia = 0.0
+fecha_actual = time.strftime("%Y-%m-%d")
+MODO_DEMO = True
+MONTO_MINIMO_USDT = 5.0
+
 def obtener_credenciales_bitget():
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
            os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
@@ -240,6 +246,25 @@ def menu_operar(message):
     )
     bot.send_message(message.chat.id, "⚙️ **CENTRAL DE OPERACIONES (EXCLUSIVO BITGET)** 🟢", reply_markup=markup, parse_mode="Markdown")
 
+@bot.message_handler(commands=['pnt', 'PNT'])
+def comando_pnt(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    bot.send_message(message.chat.id, "🔍 **Analizando PNT/USDT en Biconomy...**\nPor favor espera unos segundos.", parse_mode="Markdown")
+    
+    analisis = obtener_analisis_pnt()
+    
+    rep = (
+        "🔔 **ANÁLISIS TÉCNICO PNT/USDT (BICONOMY)** 🔔\n\n"
+        f"💵 **Precio Actual:** ${analisis['precio']}\n\n"
+        f"📊 **MACRO (1H):** {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
+        f"📈 **CORTO PLAZO (15M):** {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+        f"🧱 **Resistencia:** ${analisis['resistencia']}\n"
+        f"🟡 **Soporte:** ${analisis['soporte']}\n\n"
+        f"🎯 **SEÑAL:**\n• {analisis['estado']}\n• {analisis['pausa']}"
+    )
+    bot.send_message(message.chat.id, rep, parse_mode="Markdown")
+
 def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
     try:
         ex = crear_instancia_exchange(mercado)
@@ -247,6 +272,15 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         api, secret, _ = obtener_credenciales_bitget()
         if not api or not secret:
             return False, 0, 0, 0, 0, 0, 0, "❌ **Error:** Faltan las credenciales de Bitget."
+        
+        global perdida_acumulada_dia, fecha_actual
+        hoy = time.strftime("%Y-%m-%d")
+        if hoy != fecha_actual:
+            perdida_acumulada_dia = 0.0
+            fecha_actual = hoy
+        
+        if perdida_acumulada_dia >= LIMITE_PERDIDA_DIARIA:
+            return False, 0, 0, 0, 0, 0, 0, f"🛑 **BLOQUEO POR PÉRDIDA DIARIA:** Has alcanzado el límite de ${LIMITE_PERDIDA_DIARIA} USD. El bot no ejecutará más órdenes hasta mañana."
         
         if mercado == 'swap' and apalancamiento > 1:
             try:
@@ -277,6 +311,13 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
 
         amount_tokens = (margen_usdt * apalancamiento) / precio_objetivo if tipo_orden == 'limit' else margen_usdt / precio_actual
         
+        monto_total_operacion = margen_usdt * apalancamiento
+        if monto_total_operacion < MONTO_MINIMO_USDT:
+            return False, 0, 0, 0, 0, 0, 0, f"⚠️ **MONTO INSUFICIENTE:** El monto total de la operación (${monto_total_operacion:.2f} USDT) es menor al mínimo permitido (${MONTO_MINIMO_USDT} USDT). Aumenta el margen o el apalancamiento."
+        
+        if amount_tokens <= 0:
+            return False, 0, 0, 0, 0, 0, 0, "⚠️ **ERROR DE CÁLCULO:** El monto en tokens es 0 o negativo. Verifica el margen y el precio."
+        
         params = {}
         if mercado == 'swap':
             params = {
@@ -289,16 +330,31 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             if tipo_orden == 'market' and side == 'buy':
                 params = {'createMarketBuyOrderRequiresPrice': False}
 
-        if tipo_orden == 'market':
-            orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
+        if MODO_DEMO:
+            print(f"[MODO DEMO] Orden simulada: {side.upper()} {amount_tokens:.6f} {market_symbol} a precio {precio_objetivo if tipo_orden == 'limit' else precio_actual}")
+            orden = {
+                'id': f"DEMO-{int(time.time())}",
+                'symbol': market_symbol,
+                'side': side,
+                'type': tipo_orden,
+                'amount': amount_tokens,
+                'price': precio_objetivo if tipo_orden == 'limit' else precio_actual,
+                'status': 'simulated',
+                'info': {'demo': True}
+            }
         else:
-            params['price'] = ex.price_to_precision(market_symbol, precio_objetivo)
-            orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
-            precio_actual = precio_objetivo
+            if tipo_orden == 'market':
+                orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
+            else:
+                params['price'] = ex.price_to_precision(market_symbol, precio_objetivo)
+                orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
+                precio_actual = precio_objetivo
 
         return True, precio_actual, margen_usdt, apalancamiento, tipo_orden, stop_loss, take_profit, orden
     except Exception as e:
         error_str = str(e)
+        global perdida_acumulada_dia
+        perdida_acumulada_dia += 1.0
         if "45110" in error_str or "minimum amount" in error_str:
             mensaje_amigable = "❌ **Error en Bitget:** El monto es menor al mínimo permitido (Mínimo requerido: 5 USDT)."
         elif "balance" in error_str.lower() or "insufficient" in error_str.lower():
@@ -350,35 +406,24 @@ def callback_query(call):
         elif len(datos) == 3 and datos[0] == "opc":
             mercado_tipo, coin = datos[1], datos[2]
             if mercado_tipo == "fut":
-                bot.answer_callback_query(call.id, f"Apalancamiento para {coin}...")
-                m_lev = InlineKeyboardMarkup(row_width=3)
-                m_lev.add(
-                    InlineKeyboardButton("1x", callback_data=f"lev_{coin}_1"),
-                    InlineKeyboardButton("5x", callback_data=f"lev_{coin}_5"),
-                    InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
-                    InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
-                )
-                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bitget):**", reply_markup=m_lev, parse_mode="Markdown")
-            else:
-                bot.answer_callback_query(call.id, f"Margen para {coin}...")
-                m_mar = InlineKeyboardMarkup(row_width=3)
-                m_mar.add(
-                    InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
-                    InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
-                    InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
-                )
-                bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot Bitget {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown")
-
-        elif accion == "lev" and len(datos) == 3:
-            coin, lev = datos[1], int(datos[2])
-            bot.answer_callback_query(call.id, f"Tipo de orden para {coin}...")
-            m_tipo = InlineKeyboardMarkup(row_width=2)
-            m_tipo.add(
-                InlineKeyboardButton("🚀 Mercado (Instantánea)", callback_data=f"tipo_fut_{coin}_{lev}_market"),
-                InlineKeyboardButton("⏳ Límite (Precio Objetivo)", callback_data=f"tipo_fut_{coin}_{lev}_limit")
-            )
-            bot.send_message(call.message.chat.id, f"⚙️ **Selecciona el Tipo de Orden para {coin} ({lev}x):**", reply_markup=m_tipo, parse_mode="Markdown")
-
+    bot.answer_callback_query(call.id, f"Apalancamiento para {coin}...")
+    m_lev = InlineKeyboardMarkup(row_width=3)
+    m_lev.add(
+        InlineKeyboardButton("1x", callback_data=f"lev_{coin}_1"),
+        InlineKeyboardButton("5x", callback_data=f"lev_{coin}_5"),
+        InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
+        InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
+    )
+    bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bitget):**", reply_markup=m_lev, parse_mode="Markdown")
+elif accion == "lev" and len(datos) == 3:
+    bot.answer_callback_query(call.id, f"Margen para {coin}...")
+    m_mar = InlineKeyboardMarkup(row_width=3)
+    m_mar.add(
+        InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
+        InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
+        InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
+    )
+    bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot Bitget {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown") 
         elif accion == "tipo" and len(datos) == 5:
             coin, lev, tipo_o = datos[2], int(datos[3]), datos[4]
             if tipo_o == "market":
@@ -424,8 +469,9 @@ def callback_query(call):
 
             if exito:
                 direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
+                modo_texto = "🧪 **MODO DEMO (SIMULACIÓN)**" if MODO_DEMO else "✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅"
                 rep = (
-                    f"✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅\n\n"
+                    f"{modo_texto}\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
                     f"⚙️ **Mercado:** {'Futuros' if mercado_tipo == 'fut' else 'Spot'}\n"
                     f"📈 **Dirección:** {direccion}\n"
