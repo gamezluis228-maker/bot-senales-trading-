@@ -219,8 +219,8 @@ def bucle_reportes_automaticos():
         except Exception as e:
             print(f"Error en bucle automático: {e}")
         time.sleep(15)
-        def bucle_monitoreo_ordenes():
-    time.sleep(30)
+    def bucle_monitoreo_ordenes():
+        time.sleep(30)
     while True:
         try:
             if ordenes_abiertas:
