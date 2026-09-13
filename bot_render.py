@@ -561,9 +561,9 @@ def callback_query(call):
         else:
             bot.answer_callback_query(call.id, "Opción no reconocida.")
             
-    except Exception as e:
-        print(f"Error en callback: {e}")
-        bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
+except Exception as e:
+    print(f"Error en callback: {e}")
+    bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
 
 def iniciar_hilos():
     hilo_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
