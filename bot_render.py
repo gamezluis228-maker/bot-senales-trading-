@@ -390,7 +390,7 @@ def callback_query(call):
                     InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
                 )
                 bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, parse_mode="Markdown")
-                            else:
+            else:
                 bot.answer_callback_query(call.id, "Selecciona zona para orden Límite...")
                 m_zona = InlineKeyboardMarkup(row_width=2)
                 m_zona.add(
