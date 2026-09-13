@@ -37,7 +37,6 @@ ULTIMO_CHAT_ID = 7115547861
 ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0, "ETH": 0, "SOL": 0, "XRP": 0, "DOGE": 0}
 
 def obtener_credenciales_bitget():
-    # Buscador amplio para que coincida exactamente con cualquier variante de nombre (BIT...) en tus variables de Render
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
            os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
            os.getenv("BIT_KEY") or os.getenv("BITGET_API") or "")
@@ -310,16 +309,14 @@ def ejecutar_orden_bitget(symbol, mercado, side, margen_usdt):
         amount_tokens = margen_usdt / precio_actual
         params = {'createMarketBuyOrderRequiresPrice': False} if side == 'buy' else {}
         
-        # Ejecución de orden de mercado en Bitget
         orden = ex.create_order(
             symbol=market_symbol, type='market', side=side, 
             amount=ex.amount_to_precision(market_symbol, amount_tokens),
             params=params
         )
         
-        # Cálculo de control de riesgo (Stop Loss 8% y alerta de control de pérdidas del 4%)
-        stop_loss_precio = precio_actual * (1 - 0.08) # 8% abajo
-        alerta_perdida_4 = precio_actual * (1 - 0.04) # 4% de advertencia
+        stop_loss_precio = precio_actual * (1 - 0.08)
+        alerta_perdida_4 = precio_actual * (1 - 0.04)
         
         return True, precio_actual, stop_loss_precio, alerta_perdida_4, orden
     except Exception as e:
@@ -404,4 +401,9 @@ def callback_query(call):
                 msg = (
                     f"✅ **¡ORDEN EJECUTADA EN BITGET!** ✅\n\n"
                     f"🔹 **Activo:** {coin}/USDT ({mercado_key.upper()})\n"
-                    f"💵 **Margen Utili
+                    f"💵 **Margen Utilizado:** ${margen} USDT\n"
+                    f"💰 **Precio de Entrada:** ${precio_ejec:,.2f}\n\n"
+                    f"🛡️ **Gestión de Riesgo Configurada:**\n"
+                    f"• Alerta de Pérdida (-4%): ${alerta_4:,.2f}\n"
+                    f"• Stop Loss (-8%): ${sl_precio:,.2f}"
+   
