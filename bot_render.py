@@ -391,5 +391,73 @@ def callback_query(call):
                     InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
                 )
                 bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar, parse_mode="Markdown")
-            else:
-           
+                    else:
+            bot.answer_callback_query(call.id, "Selecciona zona para orden Límite...")
+            m_zona = InlineKeyboardMarkup(row_width=2)
+            m_zona.add(
+                InlineKeyboardButton("🟢 Comprar en Soporte", callback_data=f"ejec_fut_{coin}_{lev}_limit_soporte_10"),
+                InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_fut_{coin}_{lev}_limit_resistencia_10")
+            )
+            bot.send_message(call.message.chat.id, f"🎯 **Elige zona para orden Límite de {coin} ({lev}x):**\n\n*Nota: Se usarán $10 de margen por defecto para el cálculo.*", reply_markup=m_zona, parse_mode="Markdown")
+
+    elif accion == "ejec" and len(datos) >= 7:
+        mercado_tipo = datos[1]
+        coin = datos[2]
+        lev = int(datos[3]) if datos[3] != 'none' else 1
+        tipo_orden = datos[4]
+        zona = datos[5]
+        margen = float(datos[6])
+
+        msg_espera = bot.send_message(call.message.chat.id, f"⏳ **Ejecutando orden {tipo_orden.upper()} para {coin}...**\nPor favor espera.", parse_mode="Markdown")
+        mercado_ccxt = 'swap' if mercado_tipo == 'fut' else 'spot'
+        
+        exito, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado = ejecutar_orden_con_gestion_riesgo_real(
+            symbol=coin,
+            mercado=mercado_ccxt,
+            side='buy' if zona in ['none', 'soporte'] else 'sell',
+            margen_usdt=margen,
+            apalancamiento=lev,
+            tipo_orden=tipo_orden,
+            zona_precio=zona if zona != 'none' else None
+        )
+
+        bot.delete_message(call.message.chat.id, msg_espera.message_id)
+
+        if exito:
+            direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
+            rep = (
+                f"✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅\n\n"
+                f"🪙 **Activo:** {coin}/USDT\n"
+                f"⚙️ **Mercado:** {'Futuros' if mercado_tipo == 'fut' else 'Spot'}\n"
+                f"📈 **Dirección:** {direccion}\n"
+                f"💵 **Precio de Entrada:** ${precio}\n"
+                f"💰 **Margen:** ${margen_usado} USDT\n"
+                f"⚡ **Apalancamiento:** {lev_usado}x\n"
+                f"📋 **Tipo:** {tipo_usado.upper()}\n\n"
+                f"🛑 **Stop Loss:** ${sl}\n"
+                f"🎯 **Take Profit:** ${tp}\n\n"
+                f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"
+            )
+            bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
+        else:
+            bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
+
+    else:
+        bot.answer_callback_query(call.id, "Opción no reconocida.")
+        
+except Exception as e:
+    print(f"Error en callback: {e}")
+    bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
+
+def iniciar_hilos():
+    hilo_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
+    hilo_keep_alive.start()
+    hilo_reportes = threading.Thread(target=bucle_reportes_automaticos, daemon=True)
+    hilo_reportes.start()
+
+if __name__ == "__main__":
+    print("Iniciando Bot...")
+    inicializar_mercados()
+    iniciar_hilos()
+    puerto = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=puerto)           
