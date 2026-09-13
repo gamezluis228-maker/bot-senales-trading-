@@ -42,6 +42,9 @@ MONTO_MINIMO_USDT = 5.0
 # --- RASTREO DE ÓRDENES ABIERTAS ---
 ordenes_abiertas = []
 def obtener_credenciales_bitget():
+    print(f"DIAGNÓSTICO - API: {'SÍ' if os.getenv('BITGET_API_KEY') else 'NO'}") 
+    print(f"DIAGNÓSTICO - SECRET: {'SÍ' if os.getenv('BITGET_SECRET_KEY') else 'NO'}")
+    print(f"DIAGNÓSTICO - PASS: {'SÍ' if os.getenv('BITGET_PASSPHRASE') else 'NO'}")
     api = (os.getenv("BITGET_API_KEY") or os.getenv("BIT_API_KEY") or 
            os.getenv("BITGET_KEY") or os.getenv("API_KEY") or 
            os.getenv("BIT_KEY") or os.getenv("BITGET_API") or "")
