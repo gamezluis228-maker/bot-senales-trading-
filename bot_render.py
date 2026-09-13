@@ -490,7 +490,7 @@ elif accion == "lev" and len(datos) == 3:
         else:
             bot.answer_callback_query(call.id, "Opción no reconocida.")
             
-    except Exception as e:
+ except Exception as e:
         print(f"Error en callback: {e}")
         bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
 
