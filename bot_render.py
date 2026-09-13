@@ -37,7 +37,7 @@ ultimos_timestamps = {"BTC": 0, "ZEC": 0, "PNT": 0}
 LIMITE_PERDIDA_DIARIA = 10.0
 perdida_acumulada_dia = 0.0
 fecha_actual = time.strftime("%Y-%m-%d")
-MODO_DEMO = True
+MODO_DEMO = False
 MONTO_MINIMO_USDT = 5.0
 # --- RASTREO DE ÓRDENES ABIERTAS ---
 ordenes_abiertas = []
