@@ -217,8 +217,8 @@ def bucle_reportes_automaticos():
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle automático: {e}")
-        time.sleep(15)  
-@bot.message_handler(commands=['start', 'menu'])
+        time.sleep(15)
+      @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -361,7 +361,8 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         else:
             mensaje_amigable = f"❌ **Error en Bitget:** {error_str}"
         return False, 0, 0, 0, 0, 0, 0, mensaje_amigable
-      @bot.callback_query_handler(func=lambda call: True)
+
+@bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = call.message.chat.id
@@ -515,4 +516,3 @@ if __name__ == "__main__":
     iniciar_hilos()
     puerto = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=puerto)
-      
