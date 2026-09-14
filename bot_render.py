@@ -269,6 +269,7 @@ def comando_pnt(message):
 def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
     try:
         ex = crear_instancia_exchange(mercado)
+        ex.load_markets()
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
         api, secret, _ = obtener_credenciales_bitget()
         if not api or not secret:
