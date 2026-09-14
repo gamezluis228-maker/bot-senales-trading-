@@ -324,6 +324,8 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         if mercado == 'swap':
             params = {
                 'stopLoss': {'triggerPrice': stop_loss},
+                'tradeSide': 'open',
+                'posSide': 'long' if side == 'buy' else 'short',
                 'takeProfit': {'triggerPrice': take_profit}
             }
             if tipo_orden == 'market' and side == 'buy':
