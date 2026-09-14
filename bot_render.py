@@ -360,6 +360,10 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             mensaje_amigable = "❌ **Error en Bitget:** El monto es menor al mínimo permitido (Mínimo requerido: 5 USDT)."
         elif "balance" in error_str.lower() or "insufficient" in error_str.lower():
             mensaje_amigable = "❌ **Error en Bitget:** Saldo insuficiente en la billetera."
+        elif "delegateAmount" in error_str:
+            mensaje_amigable = "❌ **Error en Bitget:** La cantidad de tokens es demasiado pequeña o tiene demasiados decimales. Prueba con un monto mayor (ej: $10 o $20)."
+        elif "40808" in error_str:
+            mensaje_amigable = "❌ **Error en Bitget:** Problema con los parámetros de la orden. Verifica el monto y el apalancamiento."
         else:
             mensaje_amigable = f"❌ **Error en Bitget:** {error_str}"
         return False, 0, 0, 0, 0, 0, 0, mensaje_amigable
@@ -466,13 +470,13 @@ def callback_query(call):
                 )
                 bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bitget):**", reply_markup=m_lev, parse_mode="Markdown")
             else:
-                bot.answer_callback_query(call.id, f"Margen para {coin}...")
-                m_mar = InlineKeyboardMarkup(row_width=3)
-                m_mar.add(
-                    InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
-                    InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
-                    InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
+                bot.answer_callback_query(call.id, f"Tipo de orden para {coin}...")
+                m_tipo_spot = InlineKeyboardMarkup(row_width=2)
+                m_tipo_spot.add(
+                    InlineKeyboardButton("🚀 Mercado", callback_data=f"tipospot_{coin}_market"),
+                    InlineKeyboardButton("⏳ Límite", callback_data=f"tipospot_{coin}_limit")
                 )
+                
                 bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot Bitget {coin} (Mínimo $5):**", reply_markup=m_mar, parse_mode="Markdown")
 
         elif accion == "lev" and len(datos) == 3:
@@ -504,7 +508,24 @@ def callback_query(call):
                     InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_fut_{coin}_{lev}_limit_resistencia_10")
                 )
                 bot.send_message(call.message.chat.id, f"🎯 **Elige zona para orden Límite de {coin} ({lev}x):**\n\n*Nota: Se usarán $10 de margen por defecto para el cálculo.*", reply_markup=m_zona, parse_mode="Markdown")
-
+        elif accion == "tipospot" and len(datos) == 3:
+          coin, tipo_o = datos[1], datos[2]
+          if tipo_o == "market":
+            bot.answer_callback_query(call.id, "Selecciona margen...")
+            m_mar = InlineKeyboardMarkup(row_width=3)
+            m_mar.add(
+              InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
+              InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
+              InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
+            )
+          else:
+            bot.answer_callback_query(call.id, "Selecciona zona para Límite...")
+            m_zona_spot = InlineKeyboardMarkup(row_width=2)
+            m_zona_spot.add(
+              InlineKeyboardButton("🟢 Comprar en Soporte", callback_data=f"ejec_spot_{coin}_1_limit_soporte_10"),
+              InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_spot_{coin}_1_limit_resistencia_10")
+            )
+            bot.send_message(call.message.chat.id, f"🎯 **Elige zona para Spot {coin} (Límite):**\n\n*Nota: Se usarán $10 de margen.*", reply_markup=m_zona_spot, parse_mode="Markdown")
         elif accion == "ejec" and len(datos) >= 7:
             mercado_tipo = datos[1]
             coin = datos[2]
