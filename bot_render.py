@@ -514,12 +514,13 @@ def callback_query(call):
           coin, tipo_o = datos[1], datos[2]
           if tipo_o == "market":
             bot.answer_callback_query(call.id, "Selecciona margen...")
-            m_mar = InlineKeyboardMarkup(row_width=3)
-            m_mar.add(
+            m_mar_spot = InlineKeyboardMarkup(row_width=3)
+            m_mar_spot.add(
               InlineKeyboardButton("$5", callback_data=f"ejec_spot_{coin}_1_market_none_5"),
               InlineKeyboardButton("$10", callback_data=f"ejec_spot_{coin}_1_market_none_10"),
               InlineKeyboardButton("$20", callback_data=f"ejec_spot_{coin}_1_market_none_20")
             )
+            bot.send_message(call.message.chat.id, f"💵 **Elige Margen para Spot {coin} (Mercado):**", reply_markup=m_mar_spot, parse_mode="Markdown")
           else:
             bot.answer_callback_query(call.id, "Selecciona zona para Límite...")
             m_zona_spot = InlineKeyboardMarkup(row_width=2)
