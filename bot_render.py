@@ -178,6 +178,67 @@ def obtener_analisis_pnt():
         "tendencia_15m": "ERROR", "adx_15m": 0.0, "rsi_15m": 0.0,
         "resistencia": 0.0, "soporte": 0.0, "estado": "ERROR DE CONEXIÓN", "pausa": "No se pudo conectar a Biconomy"
     }
+def detectar_rompimiento(symbol, mercado='swap'):
+    """
+    Detecta si hay un rompimiento REAL de resistencia o soporte.
+    Retorna un diccionario con la señal o None si no hay rompimiento.
+    """
+    try:
+        ex = crear_instancia_exchange(mercado)
+        market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
+        
+        ohlcv_1h = ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
+        closes_1h = [x[4] for x in ohlcv_1h]
+        highs_1h = [x[2] for x in ohlcv_1h]
+        lows_1h = [x[3] for x in ohlcv_1h]
+        volumes_1h = [x[5] for x in ohlcv_1h]
+        
+        adx_1h = calcular_adx(highs_1h, lows_1h, closes_1h)
+        rsi_1h = calcular_rsi(closes_1h)
+        
+        resistencia = max(highs_1h[-11:-1])
+        soporte = min(lows_1h[-11:-1])
+        
+        volumen_promedio = sum(volumes_1h[-11:-1]) / 10
+        volumen_actual = volumes_1h[-1]
+        precio_actual = closes_1h[-1]
+        
+        if (precio_actual > resistencia and 
+            adx_1h > 20 and 
+            50 < rsi_1h < 70 and 
+            volumen_actual > volumen_promedio):
+            return {
+                'tipo': 'COMPRA',
+                'symbol': symbol,
+                'precio': precio_actual,
+                'resistencia': resistencia,
+                'soporte': soporte,
+                'adx': round(adx_1h, 1),
+                'rsi': round(rsi_1h, 1),
+                'volumen': volumen_actual,
+                'volumen_promedio': volumen_promedio
+            }
+        
+        if (precio_actual < soporte and 
+            adx_1h > 20 and 
+            30 < rsi_1h < 50 and 
+            volumen_actual > volumen_promedio):
+            return {
+                'tipo': 'VENTA',
+                'symbol': symbol,
+                'precio': precio_actual,
+                'resistencia': resistencia,
+                'soporte': soporte,
+                'adx': round(adx_1h, 1),
+                'rsi': round(rsi_1h, 1),
+                'volumen': volumen_actual,
+                'volumen_promedio': volumen_promedio
+            }
+        
+        return None
+    except Exception as e:
+        print(f"Error detectando rompimiento en {symbol}: {e}")
+        return None  
 
 def bucle_reportes_automaticos():
     time.sleep(10)
@@ -213,6 +274,53 @@ def bucle_reportes_automaticos():
         except Exception as e:
             print(f"Error en bucle automático: {e}")
         time.sleep(15)
+def bucle_trading_automatico():
+    time.sleep(20)
+    ultimo_analisis = {}
+    while True:
+        try:
+            tiempo_actual = time.localtime()
+            if tiempo_actual.tm_min in [0, 15, 30, 45]:
+                now_ts = time.time()
+                for coin in MONEDAS_TRADING:
+                    if now_ts - ultimo_analisis.get(coin, 0) > 800:
+                        ultimo_analisis[coin] = now_ts
+                        señal = detectar_rompimiento(coin, 'swap')
+                        if señal:
+                            tipo = señal['tipo']
+                            emoji = "🟢" if tipo == 'COMPRA' else "🔴"
+                            if coin == "PEPE":
+                                montos = [2, 5]
+                            else:
+                                montos = [2, 5, 10, 20]
+                            m = InlineKeyboardMarkup(row_width=2)
+                            botones = []
+                            for monto in montos:
+                                botones.append(InlineKeyboardButton(
+                                    f"${monto}", 
+                                    callback_data=f"aut_{coin}_{tipo}_{monto}"
+                                ))
+                            m.add(*botones)
+                            m.add(InlineKeyboardButton("❌ Cancelar", callback_data="aut_cancelar"))
+                            rep = (
+                                f"🚨 **ROMPIMIENTO DETECTADO** 🚨\n\n"
+                                f"{emoji} **Tipo:** {tipo}\n"
+                                f"🪙 **Activo:** {coin}/USDT\n"
+                                f"💵 **Precio Actual:** ${señal['precio']}\n\n"
+                                f"🧱 **Resistencia:** ${señal['resistencia']}\n"
+                                f"🟡 **Soporte:** ${señal['soporte']}\n\n"
+                                f"📊 **ADX (1H):** {señal['adx']}\n"
+                                f"📈 **RSI (1H):** {señal['rsi']}\n"
+                                f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n\n"
+                                f"🎯 **¿Autorizas la operación?**\n"
+                                f"Elige el monto:"
+                            )
+                            if ULTIMO_CHAT_ID:
+                                bot.send_message(ULTIMO_CHAT_ID, rep, reply_markup=m, parse_mode="Markdown")
+                time.sleep(60)
+        except Exception as e:
+            print(f"Error en bucle de trading automático: {e}")
+        time.sleep(15)      
 @bot.message_handler(commands=['start', 'menu'])
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
@@ -571,6 +679,60 @@ def callback_query(call):
                 bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
+              elif accion == "aut" and len(datos) >= 4:
+    if datos[1] == "cancelar":
+        bot.answer_callback_query(call.id, "Operación cancelada.")
+        bot.send_message(call.message.chat.id, "❌ **Operación cancelada por el usuario.**", parse_mode="Markdown")
+        return
+    
+    coin = datos[1]
+    tipo = datos[2]
+    monto = float(datos[3])
+    
+    bot.answer_callback_query(call.id, f"Ejecutando {tipo} de {coin}...")
+    msg_espera = bot.send_message(call.message.chat.id, f"⏳ **Ejecutando orden {tipo} para {coin}...**\nPor favor espera.", parse_mode="Markdown")
+    
+    side = 'buy' if tipo == 'COMPRA' else 'sell'
+    
+    exito, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado = ejecutar_orden_con_gestion_riesgo_real(
+        symbol=coin,
+        mercado='swap',
+        side=side,
+        margen_usdt=monto,
+        apalancamiento=10,
+        tipo_orden='market',
+        zona_precio=None
+    )
+    
+    bot.delete_message(call.message.chat.id, msg_espera.message_id)
+    
+    if exito:
+        direccion = "COMPRA (LONG) 🟢" if side == 'buy' else "VENTA (SHORT) 🔴"
+        ordenes_abiertas.append({
+            'id': resultado.get('id'),
+            'coin': coin,
+            'mercado': 'swap',
+            'market_symbol': f"{coin}/USDT:USDT",
+            'side': side,
+            'precio_entrada': precio,
+            'margen': margen_usado,
+            'apalancamiento': lev_usado
+        })
+        rep = (
+            f"✅ **¡ORDEN AUTOMÁTICA EJECUTADA!** ✅\n\n"
+            f"🪙 **Activo:** {coin}/USDT\n"
+            f"📈 **Dirección:** {direccion}\n"
+            f"💵 **Precio de Entrada:** ${precio}\n"
+            f"💰 **Margen:** ${margen_usado} USDT\n"
+            f"⚡ **Apalancamiento:** {lev_usado}x\n"
+            f"📋 **Tipo:** {tipo_usado.upper()}\n\n"
+            f"🛑 **Stop Loss:** ${sl}\n"
+            f"🎯 **Take Profit:** ${tp}\n\n"
+            f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"
+        )
+        bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
+    else:
+        bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
 
         else:
             bot.answer_callback_query(call.id, "Opción no reconocida.")
@@ -586,6 +748,8 @@ def iniciar_hilos():
     hilo_reportes.start()
     hilo_monitoreo = threading.Thread(target=bucle_monitoreo_ordenes, daemon=True)
     hilo_monitoreo.start()
+hilo_trading = threading.Thread(target=bucle_trading_automatico, daemon=True)
+hilo_trading.start()
 
 if __name__ == "__main__":
     print("Iniciando Bot...")
