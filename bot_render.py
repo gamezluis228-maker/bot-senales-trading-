@@ -680,7 +680,7 @@ def callback_query(call):
             elif True:
                 bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
             elif accion == "aut" and len(datos) >= 4:
-            if datos[1] == "cancelar":
+                if datos[1] == "cancelar":
            bot.answer_callback_query(call.id, "Operación cancelada.")
            bot.send_message(call.message.chat.id, "❌ **Operación cancelada por el usuario.**", parse_mode="Markdown")
            return
