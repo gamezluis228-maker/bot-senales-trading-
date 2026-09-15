@@ -734,8 +734,8 @@ def callback_query(call):
     else:
         bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
 
-        else:
-            bot.answer_callback_query(call.id, "Opción no reconocida.")
+        
+            
             
     except Exception as e:
         print(f"Error en callback: {e}")
