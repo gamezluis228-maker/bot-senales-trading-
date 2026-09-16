@@ -111,6 +111,63 @@ def calcular_adx(highs, lows, closes, period=14):
     dx = 100 * np.abs(plus_di - minus_di) / ((plus_di + minus_di) if (plus_di + minus_di) != 0 else 1)
     return float(dx)
 
+def obtener_tendencia_4h(symbol, mercado='swap'):
+    try:
+        ex = crear_instancia_exchange(mercado)
+        market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
+        ohlcv_4h = ex.fetch_ohlcv(market_symbol, timeframe='4h', limit=30)
+        closes_4h = [x[4] for x in ohlcv_4h]
+        highs_4h = [x[2] for x in ohlcv_4h]
+        lows_4h = [x[3] for x in ohlcv_4h]
+        tendencia_4h = "ALCISTA 🟢" if closes_4h[-1] > closes_4h[-10] else "BAJISTA 🔴"
+        adx_4h = calcular_adx(highs_4h, lows_4h, closes_4h)
+        rsi_4h = calcular_rsi(closes_4h)
+        return {"tendencia": tendencia_4h, "adx": round(adx_4h, 1), "rsi": round(rsi_4h, 1), "precio": closes_4h[-1]}
+    except Exception as e:
+        print(f"Error obteniendo tendencia 4H de {symbol}: {e}")
+        return {"tendencia": "ERROR", "adx": 0.0, "rsi": 0.0, "precio": 0.0}
+
+def obtener_sentimiento_mercado():
+    try:
+        url = "https://api.alternative.me/fng/?limit=1"
+        response = requests.get(url, timeout=10)
+        data = response.json()
+        if data and 'data' in data and len(data['data']) > 0:
+            valor = int(data['data'][0]['value'])
+            clasificacion = data['data'][0]['value_classification']
+            traduccion = {
+                "Extreme Fear": "MIEDO EXTREMO 😱",
+                "Fear": "MIEDO 😨",
+                "Neutral": "NEUTRAL 😐",
+                "Greed": "CODICIA 🤑",
+                "Extreme Greed": "CODICIA EXTREMA 🚀"
+            }
+            return {"valor": valor, "clasificacion": traduccion.get(clasificacion, clasificacion)}
+    except Exception as e:
+        print(f"Error obteniendo sentimiento: {e}")
+    return {"valor": 50, "clasificacion": "NEUTRAL 😐"}
+
+def calcular_trailing_stop(precio_entrada, precio_actual, lado, porcentaje_trailing=0.04):
+    if lado == 'buy':
+        distancia = precio_actual * porcentaje_trailing
+        trailing_sl = round(precio_actual - distancia, 6)
+        return max(trailing_sl, precio_entrada * 0.96)
+    else:
+        distancia = precio_actual * porcentaje_trailing
+        trailing_sl = round(precio_actual + distancia, 6)
+        return min(trailing_sl, precio_entrada * 1.04)
+
+def registrar_operacion(coin, tipo_orden, lado, precio_entrada, margen, apalancamiento, sl, tp, id_orden, estado='ABIERTA'):
+    try:
+        archivo = "registro_operaciones.txt"
+        fecha = time.strftime("%Y-%m-%d %H:%M:%S")
+        linea = f"{fecha} | {coin} | {tipo_orden} | {lado} | Entrada: {precio_entrada} | Margen: {margen} | Apal: {apalancamiento}x | SL: {sl} | TP: {tp} | ID: {id_orden} | Estado: {estado}\n"
+        with open(archivo, "a", encoding="utf-8") as f:
+            f.write(linea)
+        print(f"Operación registrada: {coin} - {lado}")
+    except Exception as e:
+        print(f"Error al registrar operación: {e}")
+
 def obtener_analisis_mexc(symbol, mercado='swap'):
     try:
         ex = crear_instancia_exchange(mercado)
@@ -207,6 +264,8 @@ def bucle_reportes_automaticos():
                     if now_ts - ultimos_timestamps.get(coin, 0) > 800:
                         ultimos_timestamps[coin] = now_ts
                         a = obtener_analisis_mexc(coin, 'swap')
+                        t4h = obtener_tendencia_4h(coin, 'swap')
+                        sentimiento = obtener_sentimiento_mercado()
                         titulo_activo = f"Activo MEXC: {coin}/USDT"
 
                         rep = (
@@ -214,7 +273,9 @@ def bucle_reportes_automaticos():
                             f"⚡ {titulo_activo}\n\n"
                             f"💵 Precio Actual: ${a['precio']}\n\n"
                             f"📊 MACRO (1H): {a['tendencia_1h']} | ADX: {a['adx_1h']} | RSI: {a['rsi_1h']}\n"
-                            f"📈 CORTO PLAZO (15M): {a['tendencia_15m']} | ADX: {a['adx_15m']} | RSI: {a['rsi_15m']}\n\n"
+                            f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
+                            f"📉 CORTO PLAZO (15M): {a['tendencia_15m']} | ADX: {a['adx_15m']} | RSI: {a['rsi_15m']}\n\n"
+                            f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
                             f"🧱 Resistencia: ${a['resistencia']}\n"
                             f"🟡 Soporte: ${a['soporte']}\n\n"
                             f"🎯 SEÑAL:\n• {a['estado']}\n• {a['pausa']}"
@@ -240,36 +301,49 @@ def bucle_trading_automatico():
                         ultimo_analisis[coin] = now_ts
                         señal = detectar_rompimiento(coin, 'swap')
                         if señal:
-                            tipo = señal['tipo']
-                            emoji = "🟢" if tipo == 'COMPRA' else "🔴"
-                            if coin == "PEPE":
-                                montos = [2, 5]
-                            else:
-                                montos = [2, 5, 10, 20]
-                            m = InlineKeyboardMarkup(row_width=2)
-                            botones = []
-                            for monto in montos:
-                                botones.append(InlineKeyboardButton(
-                                    f"${monto}", 
-                                    callback_data=f"aut_{coin}_{tipo}_{monto}"
-                                ))
-                            m.add(*botones)
-                            m.add(InlineKeyboardButton("❌ Cancelar", callback_data="aut_cancelar"))
-                            rep = (
-                                f"🚨 **ROMPIMIENTO DETECTADO** 🚨\n\n"
-                                f"{emoji} **Tipo:** {tipo}\n"
-                                f"🪙 **Activo:** {coin}/USDT\n"
-                                f"💵 **Precio Actual:** ${señal['precio']}\n\n"
-                                f"🧱 **Resistencia:** ${señal['resistencia']}\n"
-                                f"🟡 **Soporte:** ${señal['soporte']}\n\n"
-                                f"📊 **ADX (1H):** {señal['adx']}\n"
-                                f"📈 **RSI (1H):** {señal['rsi']}\n"
-                                f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n\n"
-                                f"🎯 **¿Autorizas la operación?**\n"
-                                f"Elige el monto:"
-                            )
-                            if ULTIMO_CHAT_ID:
-                                bot.send_message(ULTIMO_CHAT_ID, rep, reply_markup=m, parse_mode="Markdown")
+                            t4h = obtener_tendencia_4h(coin, 'swap')
+                            sentimiento = obtener_sentimiento_mercado()
+                            
+                            # Filtro de sentimiento extremo
+                            sentimiento_extremo = sentimiento['valor'] > 80 or sentimiento['valor'] < 20
+                            
+                            if sentimiento_extremo:
+                                print(f"Señal en {coin} ignorada por sentimiento extremo ({sentimiento['valor']})")
+                                continue
+                            
+                            if (señal['tipo'] == 'COMPRA' and t4h['tendencia'] == 'ALCISTA 🟢') or (señal['tipo'] == 'VENTA' and t4h['tendencia'] == 'BAJISTA 🔴'):
+                                tipo = señal['tipo']
+                                emoji = "🟢" if tipo == 'COMPRA' else "🔴"
+                                if coin == "PEPE":
+                                    montos = [2, 5]
+                                else:
+                                    montos = [2, 5, 10, 20]
+                                m = InlineKeyboardMarkup(row_width=2)
+                                botones = []
+                                for monto in montos:
+                                    botones.append(InlineKeyboardButton(
+                                        f"${monto}", 
+                                        callback_data=f"aut_{coin}_{tipo}_{monto}"
+                                    ))
+                                m.add(*botones)
+                                m.add(InlineKeyboardButton("❌ Cancelar", callback_data="aut_cancelar"))
+                                rep = (
+                                    f"🚨 **ROMPIMIENTO DETECTADO** 🚨\n\n"
+                                    f"{emoji} **Tipo:** {tipo}\n"
+                                    f"🪙 **Activo:** {coin}/USDT\n"
+                                    f"💵 **Precio Actual:** ${señal['precio']}\n\n"
+                                    f"📊 **Tendencia 4H:** {t4h['tendencia']} (ADX: {t4h['adx']} | RSI: {t4h['rsi']})\n"
+                                    f"😱 **Sentimiento:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
+                                    f"🧱 **Resistencia:** ${señal['resistencia']}\n"
+                                    f"🟡 **Soporte:** ${señal['soporte']}\n\n"
+                                    f"📊 **ADX (1H):** {señal['adx']}\n"
+                                    f"📈 **RSI (1H):** {señal['rsi']}\n"
+                                    f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n\n"
+                                    f"🎯 **¿Autorizas la operación?**\n"
+                                    f"Elige el monto:"
+                                )
+                                if ULTIMO_CHAT_ID:
+                                    bot.send_message(ULTIMO_CHAT_ID, rep, reply_markup=m, parse_mode="Markdown")
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle de trading automático: {e}")
@@ -381,25 +455,12 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             if tipo_orden == 'market' and side == 'buy':
                 params = {'createMarketBuyOrderRequiresPrice': False}
 
-        if MODO_DEMO:
-            print(f"[MODO DEMO] Orden simulada: {side.upper()} {amount_tokens:.6f} {market_symbol} a precio {precio_objetivo if tipo_orden == 'limit' else precio_actual}")
-            orden = {
-                'id': f"DEMO-{int(time.time())}",
-                'symbol': market_symbol,
-                'side': side,
-                'type': tipo_orden,
-                'amount': amount_tokens,
-                'price': precio_objetivo if tipo_orden == 'limit' else precio_actual,
-                'status': 'simulated',
-                'info': {'demo': True}
-            }
+        if tipo_orden == 'market':
+            orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
         else:
-            if tipo_orden == 'market':
-                orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
-            else:
-                params['price'] = ex.price_to_precision(market_symbol, precio_objetivo)
-                orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
-                precio_actual = precio_objetivo
+            params['price'] = ex.price_to_precision(market_symbol, precio_objetivo)
+            orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
+            precio_actual = precio_objetivo
 
         return True, precio_actual, margen_usdt, apalancamiento, tipo_orden, stop_loss, take_profit, orden
     except Exception as e:
@@ -425,17 +486,38 @@ def bucle_monitoreo_ordenes():
                         orden_actual = ex.fetch_order(orden_info['id'], market_symbol)
                         estado = orden_actual.get('status', 'open')
                         
+                        # === TRAILING STOP FUNCIONAL ===
+                        if estado == 'open':
+                            try:
+                                ticker = ex.fetch_ticker(market_symbol)
+                                precio_actual = float(ticker['last'])
+                                precio_entrada = orden_info['precio_entrada']
+                                lado = orden_info['side']
+                                
+                                nuevo_sl = calcular_trailing_stop(precio_entrada, precio_actual, lado, 0.04)
+                                sl_anterior = orden_info.get('sl_actual', orden_info['sl_inicial'])
+                                
+                                if lado == 'buy' and nuevo_sl > sl_anterior:
+                                    orden_info['sl_actual'] = nuevo_sl
+                                    print(f"Trailing Stop actualizado para {orden_info['coin']}: ${sl_anterior} → ${nuevo_sl}")
+                                elif lado == 'sell' and nuevo_sl < sl_anterior:
+                                    orden_info['sl_actual'] = nuevo_sl
+                                    print(f"Trailing Stop actualizado para {orden_info['coin']}: ${sl_anterior} → ${nuevo_sl}")
+                            except Exception as e:
+                                print(f"Error calculando Trailing Stop para {orden_info['coin']}: {e}")
+                        
+                        # === MONITOREO DE CIERRE ===
                         if estado in ['closed', 'canceled', 'filled']:
                             precio_entrada = orden_info['precio_entrada']
-                            precio_actual = orden_actual.get('price', 0) or orden_actual.get('average', 0) or precio_entrada
+                            precio_salida = orden_actual.get('price', 0) or orden_actual.get('average', 0) or precio_entrada
                             lado = orden_info['side']
                             margen = orden_info['margen']
                             apalancamiento = orden_info['apalancamiento']
                             
                             if lado == 'buy':
-                                pnl_pct = ((precio_actual - precio_entrada) / precio_entrada) * 100
+                                pnl_pct = ((precio_salida - precio_entrada) / precio_entrada) * 100
                             else:
-                                pnl_pct = ((precio_entrada - precio_actual) / precio_entrada) * 100
+                                pnl_pct = ((precio_entrada - precio_salida) / precio_entrada) * 100
                             
                             pnl_usdt = margen * apalancamiento * (pnl_pct / 100)
                             emoji_resultado = "🟢 GANANCIA" if pnl_usdt > 0 else "🔴 PÉRDIDA"
@@ -446,7 +528,7 @@ def bucle_monitoreo_ordenes():
                                 f"⚙️ **Mercado:** Futuros\n"
                                 f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if lado == 'buy' else 'VENTA (SHORT) 🔴'}\n"
                                 f"💵 **Precio Entrada:** ${precio_entrada}\n"
-                                f"💵 **Precio Salida:** ${precio_actual}\n"
+                                f"💵 **Precio Salida:** ${precio_salida}\n"
                                 f"💰 **Margen:** ${margen} USDT\n"
                                 f"⚡ **Apalancamiento:** {apalancamiento}x\n\n"
                                 f"{emoji_resultado}: **${pnl_usdt:.2f} USDT** ({pnl_pct:+.2f}%)\n\n"
@@ -456,12 +538,13 @@ def bucle_monitoreo_ordenes():
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
                             
+                            registrar_operacion(orden_info['coin'], 'market', lado, precio_entrada, margen, apalancamiento, orden_info.get('sl_actual', 0), 0, orden_info['id'], 'CERRADA')
                             ordenes_abiertas.remove(orden_info)
                     except Exception as e:
                         print(f"Error monitoreando orden {orden_info.get('id', '?')}: {e}")
         except Exception as e:
             print(f"Error en bucle de monitoreo: {e}")
-        time.sleep(180)
+        time.sleep(60)
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_query(call):
@@ -477,6 +560,8 @@ def callback_query(call):
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
             analisis = obtener_analisis_mexc(coin, 'swap')
+            t4h = obtener_tendencia_4h(coin, 'swap')
+            sentimiento = obtener_sentimiento_mercado()
             titulo_activo = f"Activo MEXC: {coin}/USDT"
             
             rep = (
@@ -484,7 +569,9 @@ def callback_query(call):
                 f"⚡ {titulo_activo}\n\n"
                 f"💵 Precio Actual: ${analisis['precio']}\n\n"
                 f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-                f"📈 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
+                f"📉 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
                 f"🧱 Resistencia: ${analisis['resistencia']}\n"
                 f"🟡 Soporte: ${analisis['soporte']}\n\n"
                 f"🎯 SEÑAL:\n• {analisis['estado']}\n• {analisis['pausa']}"
@@ -495,13 +582,17 @@ def callback_query(call):
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
             analisis = obtener_analisis_mexc(coin, 'swap')
+            t4h = obtener_tendencia_4h(coin, 'swap')
+            sentimiento = obtener_sentimiento_mercado()
             
             rep = (
                 "🔔 ANÁLISIS TÉCNICO 🔔\n"
                 f"⚡ Activo MEXC: {coin}/USDT\n\n"
                 f"💵 Precio Actual: ${analisis['precio']}\n\n"
                 f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-                f"📈 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
+                f"📉 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
+                f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
                 f"🧱 Resistencia: ${analisis['resistencia']}\n"
                 f"🟡 Soporte: ${analisis['soporte']}\n\n"
                 f"🎯 SEÑAL:\n• {analisis['estado']}\n• {analisis['pausa']}"
@@ -590,8 +681,11 @@ def callback_query(call):
                     'side': 'buy' if zona in ['none', 'soporte'] else 'sell',
                     'precio_entrada': precio,
                     'margen': margen_usado,
-                    'apalancamiento': lev_usado
+                    'apalancamiento': lev_usado,
+                    'sl_inicial': sl,
+                    'sl_actual': sl
                 })
+                registrar_operacion(coin, tipo_usado, 'buy' if zona in ['none', 'soporte'] else 'sell', precio, margen_usado, lev_usado, sl, tp, resultado.get('id', 'N/A'), 'ABIERTA')
                 rep = (
                     f"✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
@@ -646,8 +740,11 @@ def callback_query(call):
                     'side': side,
                     'precio_entrada': precio,
                     'margen': margen_usado,
-                    'apalancamiento': lev_usado
+                    'apalancamiento': lev_usado,
+                    'sl_inicial': sl,
+                    'sl_actual': sl
                 })
+                registrar_operacion(coin, tipo_usado, side, precio, margen_usado, lev_usado, sl, tp, resultado.get('id', 'N/A'), 'ABIERTA')
                 rep = (
                     f"✅ **¡ORDEN AUTOMÁTICA EJECUTADA!** ✅\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
