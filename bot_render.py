@@ -201,8 +201,11 @@ def obtener_analisis_mexc(symbol, mercado='swap'):
 
 def detectar_rompimiento(symbol, mercado='swap'):
     """
-    Detecta rompimiento, falso rompimiento o toque de nivel.
-    Devuelve un diccionario con toda la info técnica.
+    Detecta 4 escenarios:
+    1. Rompimiento REAL de resistencia -> COMPRA (LONG)
+    2. Rompimiento REAL de soporte -> VENTA (SHORT)
+    3. Falso rompimiento de resistencia (mecha arriba) -> VENTA (SHORT)
+    4. Falso rompimiento de soporte (mecha abajo) -> COMPRA (LONG)
     """
     try:
         ex = crear_instancia_exchange(mercado)
@@ -210,6 +213,7 @@ def detectar_rompimiento(symbol, mercado='swap'):
         
         ohlcv_1h = ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
         closes_1h = [x[4] for x in ohlcv_1h]
+        opens_1h = [x[1] for x in ohlcv_1h]
         highs_1h = [x[2] for x in ohlcv_1h]
         lows_1h = [x[3] for x in ohlcv_1h]
         volumes_1h = [x[5] for x in ohlcv_1h]
@@ -226,6 +230,12 @@ def detectar_rompimiento(symbol, mercado='swap'):
         precio_anterior = closes_1h[-2]
         high_actual = highs_1h[-1]
         low_actual = lows_1h[-1]
+        open_actual = opens_1h[-1]
+        
+        # Cálculo de cuerpo y mechas de la vela actual
+        cuerpo = abs(precio_actual - open_actual)
+        mecha_superior = high_actual - max(precio_actual, open_actual)
+        mecha_inferior = min(precio_actual, open_actual) - low_actual
         
         t4h = obtener_tendencia_4h(symbol, mercado)
         
@@ -243,78 +253,77 @@ def detectar_rompimiento(symbol, mercado='swap'):
             'adx_4h': t4h['adx'],
             'rsi_4h': t4h['rsi'],
             'high_actual': high_actual,
-            'low_actual': low_actual
+            'low_actual': low_actual,
+            'mecha_superior': mecha_superior,
+            'mecha_inferior': mecha_inferior,
+            'cuerpo': cuerpo
         }
         
-        # Rompimiento de resistencia (COMPRA)
+        # ============================================================
+        # ESCENARIO 1: ROMPIMIENTO REAL DE RESISTENCIA -> COMPRA
+        # ============================================================
         if (precio_actual > resistencia and 
             precio_anterior <= resistencia and
-            volumen_actual > volumen_promedio):
+            volumen_actual > volumen_promedio and
+            mecha_superior < cuerpo * 1.5 and
+            rsi_1h < 75):
             info_base['tipo'] = 'COMPRA'
-            info_base['subtipo'] = 'ROMPIMIENTO_RESISTENCIA'
+            info_base['subtipo'] = 'ROMPIMIENTO_REAL_RESISTENCIA'
             info_base['direccion'] = 'LONG'
             info_base['emoji'] = '🟢'
-            info_base['descripcion'] = 'Rompió resistencia con volumen alto'
+            info_base['descripcion'] = 'Rompió resistencia REAL con volumen alto'
             return info_base
         
-        # Rompimiento de soporte (VENTA)
+        # ============================================================
+        # ESCENARIO 2: ROMPIMIENTO REAL DE SOPORTE -> VENTA
+        # ============================================================
         if (precio_actual < soporte and 
             precio_anterior >= soporte and
-            volumen_actual > volumen_promedio):
+            volumen_actual > volumen_promedio and
+            mecha_inferior < cuerpo * 1.5 and
+            rsi_1h > 25):
             info_base['tipo'] = 'VENTA'
-            info_base['subtipo'] = 'ROMPIMIENTO_SOPORTE'
+            info_base['subtipo'] = 'ROMPIMIENTO_REAL_SOPORTE'
             info_base['direccion'] = 'SHORT'
             info_base['emoji'] = '🔴'
-            info_base['descripcion'] = 'Rompió soporte con volumen alto'
+            info_base['descripcion'] = 'Rompió soporte REAL con volumen alto'
             return info_base
         
-        # Falso rompimiento de resistencia
+        # ============================================================
+        # ESCENARIO 3: FALSO ROMPIMIENTO DE RESISTENCIA -> VENTA
+        # El precio subió, tocó la resistencia, pero falló y volvió a caer
+        # ============================================================
         if (high_actual > resistencia and 
             precio_actual < resistencia and
-            precio_anterior < resistencia):
-            info_base['tipo'] = 'FALSO'
+            precio_anterior < resistencia and
+            mecha_superior > cuerpo * 1.5):
+            info_base['tipo'] = 'VENTA'
             info_base['subtipo'] = 'FALSO_ROMPIMIENTO_RESISTENCIA'
-            info_base['direccion'] = 'NINGUNA'
-            info_base['emoji'] = '⚠️'
-            info_base['descripcion'] = 'Falso rompimiento de resistencia (trampa alcista)'
+            info_base['direccion'] = 'SHORT'
+            info_base['emoji'] = '🔴'
+            info_base['descripcion'] = 'Falso rompimiento de resistencia (mecha arriba) → VENTA'
             return info_base
         
-        # Falso rompimiento de soporte
+        # ============================================================
+        # ESCENARIO 4: FALSO ROMPIMIENTO DE SOPORTE -> COMPRA
+        # El precio bajó, tocó el soporte, pero rebotó y volvió a subir
+        # ============================================================
         if (low_actual < soporte and 
             precio_actual > soporte and
-            precio_anterior > soporte):
-            info_base['tipo'] = 'FALSO'
+            precio_anterior > soporte and
+            mecha_inferior > cuerpo * 1.5):
+            info_base['tipo'] = 'COMPRA'
             info_base['subtipo'] = 'FALSO_ROMPIMIENTO_SOPORTE'
-            info_base['direccion'] = 'NINGUNA'
-            info_base['emoji'] = '⚠️'
-            info_base['descripcion'] = 'Falso rompimiento de soporte (trampa bajista)'
-            return info_base
-        
-        # Toque de resistencia
-        distancia_resistencia = abs(precio_actual - resistencia) / resistencia
-        if distancia_resistencia < 0.003 and precio_actual < resistencia:
-            info_base['tipo'] = 'TOQUE'
-            info_base['subtipo'] = 'TOQUE_RESISTENCIA'
-            info_base['direccion'] = 'NINGUNA'
-            info_base['emoji'] = '🟡'
-            info_base['descripcion'] = 'Precio tocando resistencia'
-            return info_base
-        
-        # Toque de soporte
-        distancia_soporte = abs(precio_actual - soporte) / soporte
-        if distancia_soporte < 0.003 and precio_actual > soporte:
-            info_base['tipo'] = 'TOQUE'
-            info_base['subtipo'] = 'TOQUE_SOPORTE'
-            info_base['direccion'] = 'NINGUNA'
-            info_base['emoji'] = '🟡'
-            info_base['descripcion'] = 'Precio tocando soporte'
+            info_base['direccion'] = 'LONG'
+            info_base['emoji'] = '🟢'
+            info_base['descripcion'] = 'Falso rompimiento de soporte (mecha abajo) → COMPRA'
             return info_base
         
         return None
         
     except Exception as e:
         print(f"Error detectando rompimiento en {symbol}: {e}")
-        return None
+        return None  
 def bucle_reportes_automaticos():
     time.sleep(10)
     while True:
@@ -363,28 +372,30 @@ def bucle_trading_automatico():
                         ultimo_analisis[coin] = now_ts
                         señal = detectar_rompimiento(coin, 'swap')
                         if señal:
-                            t4h = obtener_tendencia_4h(coin, 'swap')
-                            sentimiento = obtener_sentimiento_mercado()
-                            
                             tipo = señal['tipo']
-                            emoji = "🟢" if tipo == 'COMPRA' else "🔴"
-                            direccion = "COMPRA (LONG)" if tipo == 'COMPRA' else "VENTA (SHORT)"
                             
+                            # Solo avisamos si es COMPRA o VENTA (los 4 escenarios)
                             if tipo in ['COMPRA', 'VENTA']:
+                                t4h = obtener_tendencia_4h(coin, 'swap')
+                                sentimiento = obtener_sentimiento_mercado()
+                                emoji = "🟢" if tipo == 'COMPRA' else "🔴"
+                                direccion = "COMPRA (LONG)" if tipo == 'COMPRA' else "VENTA (SHORT)"
+                                
                                 m = InlineKeyboardMarkup(row_width=2)
                                 m.add(
                                     InlineKeyboardButton("✅ Sí, operar", callback_data=f"conf_{coin}_{tipo}"),
                                     InlineKeyboardButton("❌ No operar", callback_data=f"conf_no_{coin}_{tipo}")
                                 )
                                 rep = (
-                                    f"🚨 **ROMPIMIENTO DETECTADO** 🚨\n\n"
+                                    f"🚨 **SEÑAL DETECTADA** 🚨\n\n"
                                     f"{emoji} **{señal['descripcion']}**\n"
                                     f"🪙 **Activo:** {coin}/USDT\n"
                                     f"💵 **Precio Actual:** ${señal['precio']}\n\n"
                                     f"🧱 **Resistencia:** ${señal['resistencia']}\n"
                                     f"🟡 **Soporte:** ${señal['soporte']}\n\n"
                                     f"📊 **ADX (1H):** {señal['adx']} | **RSI (1H):** {señal['rsi']}\n"
-                                    f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n\n"
+                                    f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n"
+                                    f"📏 **Mecha Sup:** {señal['mecha_superior']:.4f} | **Mecha Inf:** {señal['mecha_inferior']:.4f}\n\n"
                                     f"📈 **Tendencia 4H:** {t4h['tendencia']} (ADX: {t4h['adx']} | RSI: {t4h['rsi']})\n"
                                     f"😱 **Sentimiento:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
                                     f"🎯 **Dirección sugerida:** {direccion}\n\n"
@@ -392,36 +403,6 @@ def bucle_trading_automatico():
                                 )
                                 if ULTIMO_CHAT_ID:
                                     bot.send_message(ULTIMO_CHAT_ID, rep, reply_markup=m, parse_mode="Markdown")
-                            
-                            elif tipo == 'FALSO':
-                                rep = (
-                                    f"⚠️ **ALERTA: FALSO ROMPIMIENTO** ⚠️\n\n"
-                                    f"🪙 **Activo:** {coin}/USDT\n"
-                                    f"💵 **Precio Actual:** ${señal['precio']}\n\n"
-                                    f"📋 **{señal['descripcion']}**\n\n"
-                                    f"🧱 Resistencia: ${señal['resistencia']}\n"
-                                    f"🟡 Soporte: ${señal['soporte']}\n\n"
-                                    f"📊 ADX: {señal['adx']} | RSI: {señal['rsi']}\n"
-                                    f"📈 Tendencia 4H: {t4h['tendencia']}\n\n"
-                                    f"🛑 **No se recomienda operar en este momento.**\n"
-                                    f"Esperando confirmación del mercado."
-                                )
-                                if ULTIMO_CHAT_ID:
-                                    bot.send_message(ULTIMO_CHAT_ID, rep, parse_mode="Markdown")
-                            
-                            elif tipo == 'TOQUE':
-                                rep = (
-                                    f"🟡 **NIVEL CLAVE CERCA** 🟡\n\n"
-                                    f"🪙 **Activo:** {coin}/USDT\n"
-                                    f"💵 **Precio Actual:** ${señal['precio']}\n\n"
-                                    f"📋 **{señal['descripcion']}**\n\n"
-                                    f"🧱 Resistencia: ${señal['resistencia']}\n"
-                                    f"🟡 Soporte: ${señal['soporte']}\n\n"
-                                    f"⏳ **El bot está esperando confirmación de rompimiento.**\n"
-                                    f"Te avisará cuando se rompa el nivel."
-                                )
-                                if ULTIMO_CHAT_ID:
-                                    bot.send_message(ULTIMO_CHAT_ID, rep, parse_mode="Markdown")
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle de trading automático: {e}")
@@ -512,7 +493,7 @@ def analizar_prediccion_5m(symbol):
         }
     except Exception as e:
         print(f"Error en predicción 5m de {symbol}: {e}")
-        return None
+        return None 
 def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
     try:
         ex = crear_instancia_exchange(mercado)
@@ -847,8 +828,8 @@ def callback_query(call):
             tipo = datos[2]
             
             bot.answer_callback_query(call.id, "Selecciona el monto...")
-            montos = [2, 5, 10, 20] if coin != "PEPE" else [2, 5]
-            m = InlineKeyboardMarkup(row_width=4)
+            montos = [5, 10, 20] if coin != "PEPE" else [5, 10]
+            m = InlineKeyboardMarkup(row_width=3)
             botones = []
             for monto in montos:
                 botones.append(InlineKeyboardButton(
