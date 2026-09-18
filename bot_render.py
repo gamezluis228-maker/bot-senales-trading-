@@ -44,7 +44,6 @@ ordenes_abiertas = []
 
 MONEDAS_TRADING = ["BTC", "ETH", "SOL", "DOGE", "ZEC", "PEPE"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "SOL"]
-
 def obtener_credenciales_mexc():
     api = (os.getenv("MEXC_API_KEY") or os.getenv("MEXC_KEY") or 
            os.getenv("MEXC_API") or "")
@@ -201,11 +200,16 @@ def obtener_analisis_mexc(symbol, mercado='swap'):
 
 def detectar_rompimiento(symbol, mercado='swap'):
     """
-    Detecta 4 escenarios:
+    Detecta 4 escenarios con 3 filtros:
     1. Rompimiento REAL de resistencia -> COMPRA (LONG)
     2. Rompimiento REAL de soporte -> VENTA (SHORT)
     3. Falso rompimiento de resistencia (mecha arriba) -> VENTA (SHORT)
     4. Falso rompimiento de soporte (mecha abajo) -> COMPRA (LONG)
+    
+    Filtros aplicados:
+    - RSI: no compra si >75, no venta si <25
+    - Mecha: no compra si mecha sup grande, no venta si mecha inf grande
+    - Extensión: no compra si ya subió >3% en 3 velas, no venta si ya bajó >3%
     """
     try:
         ex = crear_instancia_exchange(mercado)
@@ -237,6 +241,10 @@ def detectar_rompimiento(symbol, mercado='swap'):
         mecha_superior = high_actual - max(precio_actual, open_actual)
         mecha_inferior = min(precio_actual, open_actual) - low_actual
         
+        # Filtro de extensión
+        precio_hace3 = closes_1h[-4]
+        cambio_3_velas = ((precio_actual - precio_hace3) / precio_hace3) * 100
+        
         t4h = obtener_tendencia_4h(symbol, mercado)
         
         info_base = {
@@ -256,17 +264,17 @@ def detectar_rompimiento(symbol, mercado='swap'):
             'low_actual': low_actual,
             'mecha_superior': mecha_superior,
             'mecha_inferior': mecha_inferior,
-            'cuerpo': cuerpo
+            'cuerpo': cuerpo,
+            'cambio_3_velas': round(cambio_3_velas, 2)
         }
         
-        # ============================================================
         # ESCENARIO 1: ROMPIMIENTO REAL DE RESISTENCIA -> COMPRA
-        # ============================================================
         if (precio_actual > resistencia and 
             precio_anterior <= resistencia and
             volumen_actual > volumen_promedio and
             mecha_superior < cuerpo * 1.5 and
-            rsi_1h < 75):
+            rsi_1h < 75 and
+            cambio_3_velas < 3.0):
             info_base['tipo'] = 'COMPRA'
             info_base['subtipo'] = 'ROMPIMIENTO_REAL_RESISTENCIA'
             info_base['direccion'] = 'LONG'
@@ -274,14 +282,13 @@ def detectar_rompimiento(symbol, mercado='swap'):
             info_base['descripcion'] = 'Rompió resistencia REAL con volumen alto'
             return info_base
         
-        # ============================================================
         # ESCENARIO 2: ROMPIMIENTO REAL DE SOPORTE -> VENTA
-        # ============================================================
         if (precio_actual < soporte and 
             precio_anterior >= soporte and
             volumen_actual > volumen_promedio and
             mecha_inferior < cuerpo * 1.5 and
-            rsi_1h > 25):
+            rsi_1h > 25 and
+            cambio_3_velas > -3.0):
             info_base['tipo'] = 'VENTA'
             info_base['subtipo'] = 'ROMPIMIENTO_REAL_SOPORTE'
             info_base['direccion'] = 'SHORT'
@@ -289,10 +296,7 @@ def detectar_rompimiento(symbol, mercado='swap'):
             info_base['descripcion'] = 'Rompió soporte REAL con volumen alto'
             return info_base
         
-        # ============================================================
         # ESCENARIO 3: FALSO ROMPIMIENTO DE RESISTENCIA -> VENTA
-        # El precio subió, tocó la resistencia, pero falló y volvió a caer
-        # ============================================================
         if (high_actual > resistencia and 
             precio_actual < resistencia and
             precio_anterior < resistencia and
@@ -304,10 +308,7 @@ def detectar_rompimiento(symbol, mercado='swap'):
             info_base['descripcion'] = 'Falso rompimiento de resistencia (mecha arriba) → VENTA'
             return info_base
         
-        # ============================================================
         # ESCENARIO 4: FALSO ROMPIMIENTO DE SOPORTE -> COMPRA
-        # El precio bajó, tocó el soporte, pero rebotó y volvió a subir
-        # ============================================================
         if (low_actual < soporte and 
             precio_actual > soporte and
             precio_anterior > soporte and
@@ -323,7 +324,7 @@ def detectar_rompimiento(symbol, mercado='swap'):
         
     except Exception as e:
         print(f"Error detectando rompimiento en {symbol}: {e}")
-        return None  
+        return None
 def bucle_reportes_automaticos():
     time.sleep(10)
     while True:
@@ -395,7 +396,8 @@ def bucle_trading_automatico():
                                     f"🟡 **Soporte:** ${señal['soporte']}\n\n"
                                     f"📊 **ADX (1H):** {señal['adx']} | **RSI (1H):** {señal['rsi']}\n"
                                     f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n"
-                                    f"📏 **Mecha Sup:** {señal['mecha_superior']:.4f} | **Mecha Inf:** {señal['mecha_inferior']:.4f}\n\n"
+                                    f"📏 **Mecha Sup:** {señal['mecha_superior']:.4f} | **Mecha Inf:** {señal['mecha_inferior']:.4f}\n"
+                                    f"📈 **Cambio 3 velas:** {señal['cambio_3_velas']}%\n\n"
                                     f"📈 **Tendencia 4H:** {t4h['tendencia']} (ADX: {t4h['adx']} | RSI: {t4h['rsi']})\n"
                                     f"😱 **Sentimiento:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
                                     f"🎯 **Dirección sugerida:** {direccion}\n\n"
@@ -493,7 +495,7 @@ def analizar_prediccion_5m(symbol):
         }
     except Exception as e:
         print(f"Error en predicción 5m de {symbol}: {e}")
-        return None 
+        return None
 def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
     try:
         ex = crear_instancia_exchange(mercado)
