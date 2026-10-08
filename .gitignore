@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+estado_bot.json
+estado_bot.json.tmp
+registro_operaciones.txt
