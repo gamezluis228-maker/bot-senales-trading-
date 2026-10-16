@@ -31,19 +31,50 @@ RENDER_APP_URL = os.getenv("RENDER_EXTERNAL_URL")
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-ULTIMO_CHAT_ID = 7115547861
-ultimos_timestamps = {"BTC": 0, "ZEC": 0}
+# ID de Telegram del ÚNICO usuario autorizado. Puede sobreescribirse en Render con la
+# variable de entorno TELEGRAM_OWNER_ID (sin necesidad de tocar el código).
+DUENO_ID = int(os.getenv("TELEGRAM_OWNER_ID", "7115547861"))
+ULTIMO_CHAT_ID = DUENO_ID
+ultimos_timestamps = {"BTC": 0, "ETH": 0, "ZEC": 0}
 
-LIMITE_PERDIDA_DIARIA = 10.0
+LIMITE_PERDIDA_DIARIA = 3.0
 perdida_acumulada_dia = 0.0
 fecha_actual = time.strftime("%Y-%m-%d")
 MODO_DEMO = False
-MONTO_MINIMO_USDT = 5.0
+MONTO_MINIMO_USDT = 5.0  # mínimo del tamaño total de la posición (margen x apalancamiento)
+
+# --- Parámetros de operación (cuenta real, montos pequeños) ---
+APALANCAMIENTO_AUTO = 20          # apalancamiento de las señales automáticas
+MONTOS_PERMITIDOS = [1.5, 3.0]    # botones de margen en USDT
+MARGEN_MAXIMO_USDT = float(os.getenv("MARGEN_MAXIMO_USDT", "5"))  # tope de seguridad por operación
+# A 20x la liquidación ocurre cerca de -5%, por eso el SL no puede ser de 4%.
+SL_PORCENTAJE = 1.5               # stop loss inicial (% del precio)
+TP_PORCENTAJE = 3.0               # take profit inicial (% del precio)
+# El trailing anterior enviaba una orden de mercado en vez de mover el stop.
+# Queda desactivado hasta reescribirlo (siguiente paso).
+TRAILING_ACTIVO = False
 
 ordenes_abiertas = []
 
-MONEDAS_TRADING = ["BTC", "ETH", "SOL", "DOGE", "ZEC", "PEPE"]
+MONEDAS_TRADING = ["ETH", "ZEC"]
+MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "SOL"]
+
+
+def es_dueno(obj):
+    """True solo si el mensaje/botón viene del dueño y desde un chat privado con el bot."""
+    try:
+        user = getattr(obj, "from_user", None)
+        if user is None or user.id != DUENO_ID:
+            return False
+        chat = getattr(obj, "chat", None)
+        if chat is None:
+            chat = getattr(getattr(obj, "message", None), "chat", None)
+        return chat is not None and chat.type == "private"
+    except Exception:
+        return False
+
+
 def obtener_credenciales_mexc():
     api = (os.getenv("MEXC_API_KEY") or os.getenv("MEXC_KEY") or 
            os.getenv("MEXC_API") or "")
@@ -325,6 +356,16 @@ def detectar_rompimiento(symbol, mercado='swap'):
     except Exception as e:
         print(f"Error detectando rompimiento en {symbol}: {e}")
         return None
+def obtener_analisis_con_reintentos(symbol, mercado='swap', intentos=3, espera=3):
+    """MEXC a veces responde 503 ('service not available'). Reintenta antes de rendirse."""
+    a = None
+    for _ in range(intentos):
+        a = obtener_analisis_mexc(symbol, mercado)
+        if a.get('estado') != "FALLA EN EXCHANGE":
+            return a
+        time.sleep(espera)
+    return a
+
 def bucle_reportes_automaticos():
     time.sleep(10)
     while True:
@@ -332,10 +373,15 @@ def bucle_reportes_automaticos():
             tiempo_actual = time.localtime()
             if tiempo_actual.tm_min in [0, 15, 30, 45]:
                 now_ts = time.time()
-                for coin in ["BTC", "ZEC"]:
+                for coin in MONEDAS_REPORTE:
                     if now_ts - ultimos_timestamps.get(coin, 0) > 800:
                         ultimos_timestamps[coin] = now_ts
-                        a = obtener_analisis_mexc(coin, 'swap')
+                        a = obtener_analisis_con_reintentos(coin, 'swap')
+                        if a.get('estado') == "FALLA EN EXCHANGE":
+                            print(f"MEXC no respondió para {coin}: {a.get('pausa')}")
+                            if ULTIMO_CHAT_ID:
+                                bot.send_message(ULTIMO_CHAT_ID, f"⚠️ MEXC no respondió para {coin}/USDT (error temporal del exchange). Reintento en el próximo ciclo de 15 min.")
+                            continue
                         t4h = obtener_tendencia_4h(coin, 'swap')
                         sentimiento = obtener_sentimiento_mercado()
                         titulo_activo = f"Activo MEXC: {coin}/USDT"
@@ -513,7 +559,13 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         
         if perdida_acumulada_dia >= LIMITE_PERDIDA_DIARIA:
             return False, 0, 0, 0, 0, 0, 0, f"🛑 **BLOQUEO POR PÉRDIDA DIARIA:** Has alcanzado el límite de ${LIMITE_PERDIDA_DIARIA} USD."
-        
+
+        # Candados de seguridad: solo ETH/ZEC en futuros y tope de margen por operación
+        if mercado != 'swap' or symbol not in MONEDAS_TRADING:
+            return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** solo se permite operar {', '.join(MONEDAS_TRADING)} en Futuros."
+        if margen_usdt <= 0 or margen_usdt > MARGEN_MAXIMO_USDT:
+            return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** el margen máximo permitido por operación es ${MARGEN_MAXIMO_USDT}."
+
         if mercado == 'swap' and apalancamiento > 1:
             try:
                 ex.set_leverage(apalancamiento, market_symbol)
@@ -534,14 +586,18 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
                 precio_objetivo = resistencia
                 side = 'sell'
 
+        sl_f = SL_PORCENTAJE / 100
+        tp_f = TP_PORCENTAJE / 100
         if side == 'buy':
-            stop_loss = round(precio_objetivo * 0.96, 4)
-            take_profit = round(precio_objetivo * 1.08, 4)
+            stop_loss = round(precio_objetivo * (1 - sl_f), 4)
+            take_profit = round(precio_objetivo * (1 + tp_f), 4)
         else:
-            stop_loss = round(precio_objetivo * 1.04, 4)
-            take_profit = round(precio_objetivo * 0.92, 4)
+            stop_loss = round(precio_objetivo * (1 + sl_f), 4)
+            take_profit = round(precio_objetivo * (1 - tp_f), 4)
 
-        amount_tokens = (margen_usdt * apalancamiento) / precio_objetivo if tipo_orden == 'limit' else margen_usdt / precio_actual
+        # Tamaño de la posición = margen x apalancamiento (antes, en órdenes de mercado se
+        # enviaba solo el margen, es decir, una posición sin apalancar).
+        amount_tokens = (margen_usdt * apalancamiento) / precio_objetivo
         
         monto_total_operacion = margen_usdt * apalancamiento
         if monto_total_operacion < MONTO_MINIMO_USDT:
@@ -618,7 +674,10 @@ def bucle_monitoreo_ordenes():
     time.sleep(30)
     while True:
         try:
-            if ordenes_abiertas:
+            # Desactivado: tomaba el cierre de la orden de ENTRADA como cierre de la posición
+            # (reportaba "operación cerrada" al instante) y el trailing enviaba una orden de
+            # mercado. Se reescribe en el siguiente paso leyendo las posiciones reales de MEXC.
+            if ordenes_abiertas and TRAILING_ACTIVO:
                 for orden_info in ordenes_abiertas[:]:
                     try:
                         ex = crear_instancia_exchange(orden_info['mercado'])
@@ -687,7 +746,7 @@ def bucle_monitoreo_ordenes():
         except Exception as e:
             print(f"Error en bucle de monitoreo: {e}")
         time.sleep(60)
-@bot.message_handler(commands=['start', 'menu'])
+@bot.message_handler(commands=['start', 'menu'], func=es_dueno)
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -702,7 +761,7 @@ def mostrar_menu_principal(message):
     )
     bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min", reply_markup=markup, parse_mode="Markdown")
 
-@bot.message_handler(commands=['operar'])
+@bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -712,7 +771,7 @@ def menu_operar(message):
     )
     bot.send_message(message.chat.id, "⚙️ **CENTRAL DE OPERACIONES (FUTUROS PERPETUOS)** 🟢", reply_markup=markup, parse_mode="Markdown")
 
-@bot.message_handler(commands=['analisis'])
+@bot.message_handler(commands=['analisis'], func=es_dueno)
 def menu_analisis(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -727,7 +786,7 @@ def menu_analisis(message):
     )
     bot.send_message(message.chat.id, "🔍 **Selecciona el activo para análisis técnico:**", reply_markup=markup, parse_mode="Markdown")
 
-@bot.message_handler(commands=['predicciones'])
+@bot.message_handler(commands=['predicciones'], func=es_dueno)
 def menu_predicciones(message):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = message.chat.id
@@ -735,7 +794,7 @@ def menu_predicciones(message):
     markup.add(*[InlineKeyboardButton(f"🔮 {c}", callback_data=f"pred_{c}") for c in MONEDAS_PREDICCION])
     bot.send_message(message.chat.id, "🔮 **PREDICCIONES 5 MINUTOS** 🔮\n\nElige el activo para analizar:", reply_markup=markup, parse_mode="Markdown")
 
-@bot.callback_query_handler(func=lambda call: True)
+@bot.callback_query_handler(func=es_dueno)
 def callback_query(call):
     global ULTIMO_CHAT_ID
     ULTIMO_CHAT_ID = call.message.chat.id
@@ -777,7 +836,10 @@ def callback_query(call):
         elif accion == "ver" and len(datos) >= 2:
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
-            analisis = obtener_analisis_mexc(coin, 'swap')
+            analisis = obtener_analisis_con_reintentos(coin, 'swap')
+            if analisis.get('estado') == "FALLA EN EXCHANGE":
+                bot.send_message(call.message.chat.id, f"⚠️ MEXC no respondió para {coin}/USDT (error temporal del exchange). Intenta de nuevo en unos segundos.")
+                return
             t4h = obtener_tendencia_4h(coin, 'swap')
             sentimiento = obtener_sentimiento_mercado()
             titulo_activo = f"Activo MEXC: {coin}/USDT"
@@ -800,7 +862,10 @@ def callback_query(call):
         elif accion == "ana" and len(datos) >= 2:
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
-            analisis = obtener_analisis_mexc(coin, 'swap')
+            analisis = obtener_analisis_con_reintentos(coin, 'swap')
+            if analisis.get('estado') == "FALLA EN EXCHANGE":
+                bot.send_message(call.message.chat.id, f"⚠️ MEXC no respondió para {coin}/USDT (error temporal del exchange). Intenta de nuevo en unos segundos.")
+                return
             t4h = obtener_tendencia_4h(coin, 'swap')
             sentimiento = obtener_sentimiento_mercado()
             
@@ -830,12 +895,12 @@ def callback_query(call):
             tipo = datos[2]
             
             bot.answer_callback_query(call.id, "Selecciona el monto...")
-            montos = [5, 10, 20] if coin != "PEPE" else [5, 10]
+            montos = MONTOS_PERMITIDOS
             m = InlineKeyboardMarkup(row_width=3)
             botones = []
             for monto in montos:
                 botones.append(InlineKeyboardButton(
-                    f"${monto}", 
+                    f"${monto:.2f}",
                     callback_data=f"mont_{coin}_{tipo}_{monto}"
                 ))
             m.add(*botones)
@@ -845,11 +910,11 @@ def callback_query(call):
                 f"🎯 **AUTORIZADO:** {coin}/USDT\n"
                 f"📈 **Dirección:** {'COMPRA (LONG)' if tipo == 'COMPRA' else 'VENTA (SHORT)'}\n\n"
                 f"💰 **Elige el monto a operar:**\n"
-                f"⚡ Apalancamiento: **5x**"
+                f"⚡ Apalancamiento: **{APALANCAMIENTO_AUTO}x**"
             )
             bot.send_message(call.message.chat.id, rep, reply_markup=m, parse_mode="Markdown")
 
-        # === MONTO SELECCIONADO (ejecutar con 5x) ===
+        # === MONTO SELECCIONADO (ejecutar con el apalancamiento automático) ===
         elif accion == "mont" and len(datos) >= 4:
             coin = datos[1]
             tipo = datos[2]
@@ -865,7 +930,7 @@ def callback_query(call):
                 mercado='swap',
                 side=side,
                 margen_usdt=monto,
-                apalancamiento=5,
+                apalancamiento=APALANCAMIENTO_AUTO,
                 tipo_orden='market',
                 zona_precio=None
             )
@@ -898,7 +963,7 @@ def callback_query(call):
                     f"📋 **Tipo:** {tipo_usado.upper()}\n\n"
                     f"🛑 **Stop Loss:** ${sl}\n"
                     f"🎯 **Take Profit:** ${tp}\n"
-                    f"📊 **Trailing Stop:** ACTIVO (4%)\n\n"
+                    f"📊 **Trailing Stop:** en desarrollo (por ahora SL y TP fijos)\n\n"
                     f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"
                 )
                 bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
@@ -942,18 +1007,17 @@ def callback_query(call):
             if tipo_o == "market":
                 bot.answer_callback_query(call.id, "Selecciona margen...")
                 m_mar_fut = InlineKeyboardMarkup(row_width=3)
-                m_mar_fut.add(
-                    InlineKeyboardButton("$5", callback_data=f"ejec_fut_{coin}_{lev}_market_none_5"),
-                    InlineKeyboardButton("$10", callback_data=f"ejec_fut_{coin}_{lev}_market_none_10"),
-                    InlineKeyboardButton("$20", callback_data=f"ejec_fut_{coin}_{lev}_market_none_20")
-                )
+                m_mar_fut.add(*[
+                    InlineKeyboardButton(f"${mt:.2f}", callback_data=f"ejec_fut_{coin}_{lev}_market_none_{mt}")
+                    for mt in MONTOS_PERMITIDOS
+                ])
                 bot.send_message(call.message.chat.id, f"💵 **Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar_fut, parse_mode="Markdown")
             else:
                 bot.answer_callback_query(call.id, "Selecciona zona...")
                 m_zona = InlineKeyboardMarkup(row_width=2)
                 m_zona.add(
-                    InlineKeyboardButton("🟢 Comprar en Soporte", callback_data=f"ejec_fut_{coin}_{lev}_limit_soporte_10"),
-                    InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_fut_{coin}_{lev}_limit_resistencia_10")
+                    InlineKeyboardButton("🟢 Comprar en Soporte", callback_data=f"ejec_fut_{coin}_{lev}_limit_soporte_{MONTOS_PERMITIDOS[0]}"),
+                    InlineKeyboardButton("🔴 Vender en Resistencia", callback_data=f"ejec_fut_{coin}_{lev}_limit_resistencia_{MONTOS_PERMITIDOS[0]}")
                 )
                 bot.send_message(call.message.chat.id, f"🎯 **Zona para orden Límite de {coin} ({lev}x):**", reply_markup=m_zona, parse_mode="Markdown")
 
@@ -1007,7 +1071,7 @@ def callback_query(call):
                     f"📋 **Tipo:** {tipo_usado.upper()}\n\n"
                     f"🛑 **Stop Loss:** ${sl}\n"
                     f"🎯 **Take Profit:** ${tp}\n"
-                    f"📊 **Trailing Stop:** ACTIVO (4%)\n\n"
+                    f"📊 **Trailing Stop:** en desarrollo (por ahora SL y TP fijos)\n\n"
                     f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"
                 )
                 bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
@@ -1020,6 +1084,36 @@ def callback_query(call):
     except Exception as e:
         print(f"Error en callback: {e}")
         bot.send_message(call.message.chat.id, f"⚠️ **Error interno:** {str(e)}")
+
+intrusos_avisados = set()
+
+def registrar_intento_no_autorizado(obj):
+    """Ignora en silencio a cualquiera que no sea el dueño, lo deja en el log y te avisa una vez."""
+    try:
+        user = getattr(obj, "from_user", None)
+        uid = getattr(user, "id", None)
+        uname = getattr(user, "username", None)
+        contenido = (getattr(obj, "text", None) or getattr(obj, "data", None) or "<sin texto>")
+        print(f"[BLOQUEADO] Intento no autorizado de id={uid} usuario={uname}: {str(contenido)[:60]!r}")
+        if uid is not None and uid not in intrusos_avisados:
+            intrusos_avisados.add(uid)
+            bot.send_message(DUENO_ID, f"🚨 Alguien intentó usar tu bot y fue bloqueado.\nID: {uid}\nUsuario: @{uname}")
+    except Exception as e:
+        print(f"Error registrando intento no autorizado: {e}")
+
+@bot.message_handler(func=lambda m: True, content_types=['text', 'photo', 'document', 'sticker', 'voice', 'video', 'audio', 'location', 'contact'])
+def bloquear_mensajes_no_autorizados(message):
+    if es_dueno(message):
+        return
+    registrar_intento_no_autorizado(message)
+
+@bot.callback_query_handler(func=lambda c: True)
+def bloquear_botones_no_autorizados(call):
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
+    registrar_intento_no_autorizado(call)
 
 def iniciar_hilos():
     hilo_keep_alive = threading.Thread(target=bucle_keep_alive, daemon=True)
