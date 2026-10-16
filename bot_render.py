@@ -8,6 +8,9 @@ import numpy as np
 from flask import Flask
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+import indicadores
+import senales
+
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
     try:
@@ -47,14 +50,18 @@ MONTO_MINIMO_USDT = 5.0  # mínimo del tamaño total de la posición (margen x a
 APALANCAMIENTO_AUTO = 20          # apalancamiento de las señales automáticas
 MONTOS_PERMITIDOS = [1.5, 3.0]    # botones de margen en USDT
 MARGEN_MAXIMO_USDT = float(os.getenv("MARGEN_MAXIMO_USDT", "5"))  # tope de seguridad por operación
-# A 20x la liquidación ocurre cerca de -5%, por eso el SL no puede ser de 4%.
-SL_PORCENTAJE = 1.5               # stop loss inicial (% del precio)
-TP_PORCENTAJE = 3.0               # take profit inicial (% del precio)
-# El trailing anterior enviaba una orden de mercado en vez de mover el stop.
-# Queda desactivado hasta reescribirlo (siguiente paso).
-TRAILING_ACTIVO = False
+# 1 = margen aislado (lo máximo que pierdes es el margen de la operación), 2 = cruzado.
+TIPO_MARGEN_MEXC = int(os.getenv("MEXC_OPEN_TYPE", "1"))
+# A 20x la liquidación ocurre cerca de -5%, por eso el SL nunca puede ser de 4%.
+SL_PORCENTAJE = 1.5               # SL por defecto (operaciones manuales o sin señal vigente)
+SENAL_VIGENCIA_SEG = 5400         # una señal se puede operar con los botones durante 90 min
+SENAL_MAX_DESVIO_PCT = 0.8        # si el precio se movió más que esto desde la señal, no se opera
+INTERVALO_GESTION_SEG = 20        # cada cuánto el bot revisa el precio de tus posiciones
+GRACIA_POSICION_SEG = 90          # tiempo para que MEXC muestre una posición recién abierta
 
-ordenes_abiertas = []
+posiciones_gestionadas = {}       # moneda -> estado de la posición (stop que sigue al precio)
+senales_pendientes = {}           # (moneda, tipo) -> señal que puedes operar con los botones
+senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
 MONEDAS_TRADING = ["ETH", "ZEC"]
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
@@ -82,17 +89,25 @@ def obtener_credenciales_mexc():
               os.getenv("MEXC_SEC") or "")
     return api.strip(), secret.strip()
 
+_hilo_local = threading.local()
+
 def crear_instancia_exchange(mercado='swap'):
-    api, secret = obtener_credenciales_mexc()
-    config = {
-        'enableRateLimit': True,
-        'options': {'defaultType': mercado, 'createMarketBuyOrderRequiresPrice': False}
-    }
-    if api:
-        config['apiKey'] = api
-    if secret:
-        config['secret'] = secret
-    return ccxt.mexc(config)
+    """Una instancia de ccxt por hilo y por mercado (evita recargar los mercados en cada llamada)."""
+    cache = getattr(_hilo_local, "instancias", None)
+    if cache is None:
+        cache = _hilo_local.instancias = {}
+    if mercado not in cache:
+        api, secret = obtener_credenciales_mexc()
+        config = {
+            'enableRateLimit': True,
+            'options': {'defaultType': mercado, 'createMarketBuyOrderRequiresPrice': False}
+        }
+        if api:
+            config['apiKey'] = api
+        if secret:
+            config['secret'] = secret
+        cache[mercado] = ccxt.mexc(config)
+    return cache[mercado]
 
 exchange_default = crear_instancia_exchange('swap')
 
@@ -118,43 +133,32 @@ def bucle_keep_alive():
         time.sleep(600)
 
 def calcular_rsi(closes, period=14):
-    if len(closes) < period + 1:
-        return 50.0
-    deltas = np.diff(closes)
-    seed = deltas[:period+1]
-    up = seed[seed >= 0].sum() / period
-    down = -seed[seed < 0].sum() / period
-    if down == 0:
-        return 100.0
-    return float(100 - (100 / (1 + (up / down))))
+    return indicadores.rsi(closes, period)
 
 def calcular_adx(highs, lows, closes, period=14):
-    if len(closes) < period + 1:
-        return 15.0
-    highs, lows, closes = np.array(highs), np.array(lows), np.array(closes)
-    tr = np.max(np.array([
-        highs[1:] - lows[1:],
-        np.abs(highs[1:] - closes[:-1]),
-        np.abs(lows[1:] - closes[:-1])
-    ]), axis=0)
-    atr = np.mean(tr[-period:])
-    delta_high, delta_low = np.diff(highs), -np.diff(lows)
-    plus_dm = np.where((delta_high > delta_low) & (delta_high > 0), delta_high, 0.0)
-    minus_dm = np.where((delta_low > delta_high) & (delta_low > 0), delta_low, 0.0)
-    plus_di = 100 * np.mean(plus_dm[-period:]) / (atr if atr != 0 else 1)
-    minus_di = 100 * np.mean(minus_dm[-period:]) / (atr if atr != 0 else 1)
-    dx = 100 * np.abs(plus_di - minus_di) / ((plus_di + minus_di) if (plus_di + minus_di) != 0 else 1)
-    return float(dx)
+    return indicadores.adx(highs, lows, closes, period)
+
+def etiqueta_tendencia(t):
+    return {"ALCISTA": "ALCISTA 🟢", "BAJISTA": "BAJISTA 🔴"}.get(t, "NEUTRAL 🟡")
+
+def _p(x):
+    """Redondea un precio para mostrarlo (más decimales en monedas baratas como PEPE)."""
+    try:
+        x = float(x)
+    except Exception:
+        return x
+    return round(x, 2) if abs(x) >= 1 else round(x, 8)
 
 def obtener_tendencia_4h(symbol, mercado='swap'):
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
-        ohlcv_4h = ex.fetch_ohlcv(market_symbol, timeframe='4h', limit=30)
+        ohlcv_4h = ex.fetch_ohlcv(market_symbol, timeframe='4h', limit=120)
         closes_4h = [x[4] for x in ohlcv_4h]
         highs_4h = [x[2] for x in ohlcv_4h]
         lows_4h = [x[3] for x in ohlcv_4h]
-        tendencia_4h = "ALCISTA 🟢" if closes_4h[-1] > closes_4h[-10] else "BAJISTA 🔴"
+        # Tendencia por EMA 20/50 de 4H (antes: solo comparaba contra el cierre de hace 10 velas)
+        tendencia_4h = etiqueta_tendencia(senales.tendencia(closes_4h))
         adx_4h = calcular_adx(highs_4h, lows_4h, closes_4h)
         rsi_4h = calcular_rsi(closes_4h)
         return {"tendencia": tendencia_4h, "adx": round(adx_4h, 1), "rsi": round(rsi_4h, 1), "precio": closes_4h[-1]}
@@ -181,16 +185,6 @@ def obtener_sentimiento_mercado():
         print(f"Error obteniendo sentimiento: {e}")
     return {"valor": 50, "clasificacion": "NEUTRAL 😐"}
 
-def calcular_trailing_stop(precio_entrada, precio_actual, lado, porcentaje_trailing=0.04):
-    if lado == 'buy':
-        distancia = precio_actual * porcentaje_trailing
-        trailing_sl = round(precio_actual - distancia, 6)
-        return max(trailing_sl, precio_entrada * 0.96)
-    else:
-        distancia = precio_actual * porcentaje_trailing
-        trailing_sl = round(precio_actual + distancia, 6)
-        return min(trailing_sl, precio_entrada * 1.04)
-
 def registrar_operacion(coin, tipo_orden, lado, precio_entrada, margen, apalancamiento, sl, tp, id_orden, estado='ABIERTA'):
     try:
         archivo = "registro_operaciones.txt"
@@ -206,23 +200,33 @@ def obtener_analisis_mexc(symbol, mercado='swap'):
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
-        ohlcv_1h = ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
+        ohlcv_1h = ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=260)
         closes_1h, highs_1h, lows_1h = [x[4] for x in ohlcv_1h], [x[2] for x in ohlcv_1h], [x[3] for x in ohlcv_1h]
-        ohlcv_15m = ex.fetch_ohlcv(market_symbol, timeframe='15m', limit=30)
+        ohlcv_15m = ex.fetch_ohlcv(market_symbol, timeframe='15m', limit=100)
         closes_15m, highs_15m, lows_15m = [x[4] for x in ohlcv_15m], [x[2] for x in ohlcv_15m], [x[3] for x in ohlcv_15m]
         adx_15m = calcular_adx(highs_15m, lows_15m, closes_15m)
         estado_mercado = "MERCADO LATERAL / RANGO EN 15M (ADX < 20)" if adx_15m < 20 else "TENDENCIA ACTIVA EN 15M"
-        pausa_texto = "Estructura de 15m con fuerza tendencial." if adx_15m > 20 else "Precaución: Rango plano en corto plazo."
+        pausa_texto = "Estructura de 15m con fuerza tendencial." if adx_15m >= 20 else "Precaución: Rango plano en corto plazo."
+
+        ema9_15m = indicadores.ultima_ema(closes_15m, 9)
+        ema21_15m = indicadores.ultima_ema(closes_15m, 21)
+        atr_1h = indicadores.atr(highs_1h, lows_1h, closes_1h)
+        # Niveles: máximo/mínimo de las últimas 24 velas de 1H ya cerradas (mismo criterio que las señales)
+        resistencia, soporte, _, _ = indicadores.niveles(highs_1h[:-1], lows_1h[:-1], atr_1h, senales.VENTANA_NIVEL)
         return {
             "precio": closes_1h[-1],
-            "tendencia_1h": "ALCISTA 🟢" if closes_1h[-1] > closes_1h[-10] else "BAJISTA 🔴",
+            "tendencia_1h": etiqueta_tendencia(senales.tendencia(closes_1h)),
             "adx_1h": round(calcular_adx(highs_1h, lows_1h, closes_1h), 1),
             "rsi_1h": round(calcular_rsi(closes_1h), 1),
-            "tendencia_15m": "ALCISTA 🟢" if closes_15m[-1] > closes_15m[-10] else "BAJISTA 🔴",
+            "tendencia_15m": "ALCISTA 🟢" if ema9_15m > ema21_15m else "BAJISTA 🔴",
             "adx_15m": round(adx_15m, 1),
             "rsi_15m": round(calcular_rsi(closes_15m), 1),
-            "resistencia": round(float(max(highs_1h[-10:])), 2),
-            "soporte": round(float(min(lows_1h[-10:])), 2),
+            "ema9_15m": _p(ema9_15m), "ema21_15m": _p(ema21_15m),
+            "ema20_1h": _p(indicadores.ultima_ema(closes_1h, 20)),
+            "ema50_1h": _p(indicadores.ultima_ema(closes_1h, 50)),
+            "ema200_1h": _p(indicadores.ultima_ema(closes_1h, 200)),
+            "resistencia": _p(resistencia),
+            "soporte": _p(soporte),
             "estado": estado_mercado,
             "pausa": pausa_texto
         }
@@ -230,132 +234,27 @@ def obtener_analisis_mexc(symbol, mercado='swap'):
         return {"precio": 0.0, "tendencia_1h": "ERROR", "adx_1h": 0.0, "rsi_1h": 0.0, "tendencia_15m": "ERROR", "adx_15m": 0.0, "rsi_15m": 0.0, "resistencia": 0.0, "soporte": 0.0, "estado": "FALLA EN EXCHANGE", "pausa": str(e)}
 
 def detectar_rompimiento(symbol, mercado='swap'):
-    """
-    Detecta 4 escenarios con 3 filtros:
-    1. Rompimiento REAL de resistencia -> COMPRA (LONG)
-    2. Rompimiento REAL de soporte -> VENTA (SHORT)
-    3. Falso rompimiento de resistencia (mecha arriba) -> VENTA (SHORT)
-    4. Falso rompimiento de soporte (mecha abajo) -> COMPRA (LONG)
-    
-    Filtros aplicados:
-    - RSI: no compra si >75, no venta si <25
-    - Mecha: no compra si mecha sup grande, no venta si mecha inf grande
-    - Extensión: no compra si ya subió >3% en 3 velas, no venta si ya bajó >3%
-    """
+    """Evalúa la última vela CERRADA de 1H y devuelve una lista de señales (la mejor primero).
+    Cada señal trae veredicto (VERDADERO / PROBABLE / DEBIL), puntaje y verificación detallada.
+    Ver senales.py para las reglas (volumen, cierre, EMAs 1H/4H, ADX, RSI, extensión, toques, BTC,
+    retest y falso rompimiento)."""
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
-        
-        ohlcv_1h = ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=30)
-        closes_1h = [x[4] for x in ohlcv_1h]
-        opens_1h = [x[1] for x in ohlcv_1h]
-        highs_1h = [x[2] for x in ohlcv_1h]
-        lows_1h = [x[3] for x in ohlcv_1h]
-        volumes_1h = [x[5] for x in ohlcv_1h]
-        
-        adx_1h = calcular_adx(highs_1h, lows_1h, closes_1h)
-        rsi_1h = calcular_rsi(closes_1h)
-        
-        resistencia = max(highs_1h[-11:-1])
-        soporte = min(lows_1h[-11:-1])
-        
-        volumen_promedio = sum(volumes_1h[-11:-1]) / 10
-        volumen_actual = volumes_1h[-1]
-        precio_actual = closes_1h[-1]
-        precio_anterior = closes_1h[-2]
-        high_actual = highs_1h[-1]
-        low_actual = lows_1h[-1]
-        open_actual = opens_1h[-1]
-        
-        # Cálculo de cuerpo y mechas de la vela actual
-        cuerpo = abs(precio_actual - open_actual)
-        mecha_superior = high_actual - max(precio_actual, open_actual)
-        mecha_inferior = min(precio_actual, open_actual) - low_actual
-        
-        # Filtro de extensión
-        precio_hace3 = closes_1h[-4]
-        cambio_3_velas = ((precio_actual - precio_hace3) / precio_hace3) * 100
-        
-        t4h = obtener_tendencia_4h(symbol, mercado)
-        
-        info_base = {
-            'symbol': symbol,
-            'precio': precio_actual,
-            'precio_anterior': precio_anterior,
-            'resistencia': resistencia,
-            'soporte': soporte,
-            'adx': round(adx_1h, 1),
-            'rsi': round(rsi_1h, 1),
-            'volumen': volumen_actual,
-            'volumen_promedio': volumen_promedio,
-            'tendencia_4h': t4h['tendencia'],
-            'adx_4h': t4h['adx'],
-            'rsi_4h': t4h['rsi'],
-            'high_actual': high_actual,
-            'low_actual': low_actual,
-            'mecha_superior': mecha_superior,
-            'mecha_inferior': mecha_inferior,
-            'cuerpo': cuerpo,
-            'cambio_3_velas': round(cambio_3_velas, 2)
-        }
-        
-        # ESCENARIO 1: ROMPIMIENTO REAL DE RESISTENCIA -> COMPRA
-        if (precio_actual > resistencia and 
-            precio_anterior <= resistencia and
-            volumen_actual > volumen_promedio and
-            mecha_superior < cuerpo * 1.5 and
-            rsi_1h < 75 and
-            cambio_3_velas < 3.0):
-            info_base['tipo'] = 'COMPRA'
-            info_base['subtipo'] = 'ROMPIMIENTO_REAL_RESISTENCIA'
-            info_base['direccion'] = 'LONG'
-            info_base['emoji'] = '🟢'
-            info_base['descripcion'] = 'Rompió resistencia REAL con volumen alto'
-            return info_base
-        
-        # ESCENARIO 2: ROMPIMIENTO REAL DE SOPORTE -> VENTA
-        if (precio_actual < soporte and 
-            precio_anterior >= soporte and
-            volumen_actual > volumen_promedio and
-            mecha_inferior < cuerpo * 1.5 and
-            rsi_1h > 25 and
-            cambio_3_velas > -3.0):
-            info_base['tipo'] = 'VENTA'
-            info_base['subtipo'] = 'ROMPIMIENTO_REAL_SOPORTE'
-            info_base['direccion'] = 'SHORT'
-            info_base['emoji'] = '🔴'
-            info_base['descripcion'] = 'Rompió soporte REAL con volumen alto'
-            return info_base
-        
-        # ESCENARIO 3: FALSO ROMPIMIENTO DE RESISTENCIA -> VENTA
-        if (high_actual > resistencia and 
-            precio_actual < resistencia and
-            precio_anterior < resistencia and
-            mecha_superior > cuerpo * 1.5):
-            info_base['tipo'] = 'VENTA'
-            info_base['subtipo'] = 'FALSO_ROMPIMIENTO_RESISTENCIA'
-            info_base['direccion'] = 'SHORT'
-            info_base['emoji'] = '🔴'
-            info_base['descripcion'] = 'Falso rompimiento de resistencia (mecha arriba) → VENTA'
-            return info_base
-        
-        # ESCENARIO 4: FALSO ROMPIMIENTO DE SOPORTE -> COMPRA
-        if (low_actual < soporte and 
-            precio_actual > soporte and
-            precio_anterior > soporte and
-            mecha_inferior > cuerpo * 1.5):
-            info_base['tipo'] = 'COMPRA'
-            info_base['subtipo'] = 'FALSO_ROMPIMIENTO_SOPORTE'
-            info_base['direccion'] = 'LONG'
-            info_base['emoji'] = '🟢'
-            info_base['descripcion'] = 'Falso rompimiento de soporte (mecha abajo) → COMPRA'
-            return info_base
-        
-        return None
-        
+        ahora = int(time.time() * 1000)
+        v1h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=300), 3600000, ahora)
+        v4h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='4h', limit=120), 14400000, ahora)
+        vbtc = None
+        if symbol != 'BTC':
+            try:
+                btc_symbol = "BTC/USDT:USDT" if mercado == 'swap' else "BTC/USDT"
+                vbtc = senales.solo_cerradas(ex.fetch_ohlcv(btc_symbol, timeframe='1h', limit=120), 3600000, ahora)
+            except Exception as e:
+                print(f"No pude leer BTC como contexto: {e}")
+        return senales.evaluar(symbol, v1h, v4h, vbtc)
     except Exception as e:
         print(f"Error detectando rompimiento en {symbol}: {e}")
-        return None
+        return []
 def obtener_analisis_con_reintentos(symbol, mercado='swap', intentos=3, espera=3):
     """MEXC a veces responde 503 ('service not available'). Reintenta antes de rendirse."""
     a = None
@@ -365,6 +264,23 @@ def obtener_analisis_con_reintentos(symbol, mercado='swap', intentos=3, espera=3
             return a
         time.sleep(espera)
     return a
+
+def construir_reporte(titulo, coin, a, t4h, sentimiento):
+    """Mismo formato de siempre, con las EMAs agregadas debajo de las tendencias."""
+    return (
+        f"{titulo}\n"
+        f"⚡ Activo MEXC: {coin}/USDT\n\n"
+        f"💵 Precio Actual: ${a['precio']}\n\n"
+        f"📊 MACRO (1H): {a['tendencia_1h']} | ADX: {a['adx_1h']} | RSI: {a['rsi_1h']}\n"
+        f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
+        f"📉 CORTO PLAZO (15M): {a['tendencia_15m']} | ADX: {a['adx_15m']} | RSI: {a['rsi_15m']}\n"
+        f"📐 EMA 20/50/200 (1H): ${a['ema20_1h']} / ${a['ema50_1h']} / ${a['ema200_1h']}\n"
+        f"📐 EMA 9/21 (15M): ${a['ema9_15m']} / ${a['ema21_15m']}\n\n"
+        f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
+        f"🧱 Resistencia: ${a['resistencia']}\n"
+        f"🟡 Soporte: ${a['soporte']}\n\n"
+        f"🎯 SEÑAL:\n• {a['estado']}\n• {a['pausa']}"
+    )
 
 def bucle_reportes_automaticos():
     time.sleep(10)
@@ -384,27 +300,50 @@ def bucle_reportes_automaticos():
                             continue
                         t4h = obtener_tendencia_4h(coin, 'swap')
                         sentimiento = obtener_sentimiento_mercado()
-                        titulo_activo = f"Activo MEXC: {coin}/USDT"
-
-                        rep = (
-                            "🔔 REPORTE AUTOMÁTICO CIERRE 15M / 1H 🔔\n"
-                            f"⚡ {titulo_activo}\n\n"
-                            f"💵 Precio Actual: ${a['precio']}\n\n"
-                            f"📊 MACRO (1H): {a['tendencia_1h']} | ADX: {a['adx_1h']} | RSI: {a['rsi_1h']}\n"
-                            f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
-                            f"📉 CORTO PLAZO (15M): {a['tendencia_15m']} | ADX: {a['adx_15m']} | RSI: {a['rsi_15m']}\n\n"
-                            f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
-                            f"🧱 Resistencia: ${a['resistencia']}\n"
-                            f"🟡 Soporte: ${a['soporte']}\n\n"
-                            f"🎯 SEÑAL:\n• {a['estado']}\n• {a['pausa']}"
-                        )
-
+                        rep = construir_reporte("🔔 REPORTE AUTOMÁTICO CIERRE 15M / 1H 🔔", coin, a, t4h, sentimiento)
                         if ULTIMO_CHAT_ID:
                             bot.send_message(ULTIMO_CHAT_ID, rep, parse_mode="Markdown")
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle automático: {e}")
         time.sleep(15)
+
+def construir_mensaje_senal(coin, s, sentimiento, hay_posicion=False):
+    accionable = s['veredicto'] in ('VERDADERO', 'PROBABLE') and not hay_posicion
+    lineas = [
+        "🚨 SEÑAL DETECTADA 🚨" if accionable else "ℹ️ AVISO DE MERCADO (sin operación sugerida)",
+        "",
+        f"{s['emoji']} {s['titulo']}",
+        f"📌 {s['descripcion']}",
+        f"🪙 Activo: {coin}/USDT",
+        f"💵 Precio (cierre 1H): ${_p(s['precio'])} | Nivel: ${_p(s['nivel'])}",
+        f"🏁 Calidad: {s['puntos']}/{s['total']} puntos",
+        "",
+        "Verificación:",
+    ]
+    for ok, txt in s['checklist']:
+        lineas.append(f"{'✅' if ok else '❌'} {txt}")
+    lineas += [
+        "",
+        f"📐 EMA 20/50/200 (1H): ${_p(s['ema20'])} / ${_p(s['ema50'])} / ${_p(s['ema200'])}",
+        f"📊 RSI (1H): {s['rsi']} | ADX (1H): {s['adx']}",
+        f"📈 Tendencia 4H (EMA 20/50): {s['tendencia_4h']}",
+        f"😱 Sentimiento: {sentimiento['clasificacion']} ({sentimiento['valor']}/100)",
+        "",
+    ]
+    if accionable:
+        direccion = "COMPRA (LONG)" if s['tipo'] == 'COMPRA' else "VENTA (SHORT)"
+        lineas += [
+            f"🎯 Dirección sugerida: {direccion}",
+            f"🛡️ Plan: SL {s['sl_pct']}% | TP techo {s['tp_pct']}% | el stop sube con el precio | {APALANCAMIENTO_AUTO}x",
+            "",
+            "¿Quieres operar?",
+        ]
+    elif hay_posicion:
+        lineas.append("Ya hay una posición abierta de esta moneda.")
+    else:
+        lineas.append("Calidad insuficiente: no se recomienda operar esta señal.")
+    return "\n".join(lineas)
 
 def bucle_trading_automatico():
     time.sleep(20)
@@ -417,40 +356,26 @@ def bucle_trading_automatico():
                 for coin in MONEDAS_TRADING:
                     if now_ts - ultimo_analisis.get(coin, 0) > 800:
                         ultimo_analisis[coin] = now_ts
-                        señal = detectar_rompimiento(coin, 'swap')
-                        if señal:
-                            tipo = señal['tipo']
-                            
-                            # Solo avisamos si es COMPRA o VENTA (los 4 escenarios)
-                            if tipo in ['COMPRA', 'VENTA']:
-                                t4h = obtener_tendencia_4h(coin, 'swap')
-                                sentimiento = obtener_sentimiento_mercado()
-                                emoji = "🟢" if tipo == 'COMPRA' else "🔴"
-                                direccion = "COMPRA (LONG)" if tipo == 'COMPRA' else "VENTA (SHORT)"
-                                
-                                m = InlineKeyboardMarkup(row_width=2)
-                                m.add(
-                                    InlineKeyboardButton("✅ Sí, operar", callback_data=f"conf_{coin}_{tipo}"),
-                                    InlineKeyboardButton("❌ No operar", callback_data=f"conf_no_{coin}_{tipo}")
+                        for senal in detectar_rompimiento(coin, 'swap'):
+                            # Una misma vela cerrada solo se notifica una vez
+                            clave = (coin, senal['subtipo'])
+                            if senales_enviadas.get(clave) == senal['ts']:
+                                continue
+                            senales_enviadas[clave] = senal['ts']
+                            hay_posicion = coin in posiciones_gestionadas
+                            accionable = senal['veredicto'] in ('VERDADERO', 'PROBABLE') and not hay_posicion
+                            markup = None
+                            if accionable:
+                                senales_pendientes[(coin, senal['tipo'])] = dict(senal, creada=time.time())
+                                markup = InlineKeyboardMarkup(row_width=2)
+                                markup.add(
+                                    InlineKeyboardButton("✅ Sí, operar", callback_data=f"conf_{coin}_{senal['tipo']}"),
+                                    InlineKeyboardButton("❌ No operar", callback_data=f"conf_no_{coin}_{senal['tipo']}")
                                 )
-                                rep = (
-                                    f"🚨 **SEÑAL DETECTADA** 🚨\n\n"
-                                    f"{emoji} **{señal['descripcion']}**\n"
-                                    f"🪙 **Activo:** {coin}/USDT\n"
-                                    f"💵 **Precio Actual:** ${señal['precio']}\n\n"
-                                    f"🧱 **Resistencia:** ${señal['resistencia']}\n"
-                                    f"🟡 **Soporte:** ${señal['soporte']}\n\n"
-                                    f"📊 **ADX (1H):** {señal['adx']} | **RSI (1H):** {señal['rsi']}\n"
-                                    f"📊 **Volumen:** {señal['volumen']:.0f} (promedio: {señal['volumen_promedio']:.0f})\n"
-                                    f"📏 **Mecha Sup:** {señal['mecha_superior']:.4f} | **Mecha Inf:** {señal['mecha_inferior']:.4f}\n"
-                                    f"📈 **Cambio 3 velas:** {señal['cambio_3_velas']}%\n\n"
-                                    f"📈 **Tendencia 4H:** {t4h['tendencia']} (ADX: {t4h['adx']} | RSI: {t4h['rsi']})\n"
-                                    f"😱 **Sentimiento:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
-                                    f"🎯 **Dirección sugerida:** {direccion}\n\n"
-                                    f"¿Quieres operar?"
-                                )
-                                if ULTIMO_CHAT_ID:
-                                    bot.send_message(ULTIMO_CHAT_ID, rep, reply_markup=m, parse_mode="Markdown")
+                            sentimiento = obtener_sentimiento_mercado()
+                            texto = construir_mensaje_senal(coin, senal, sentimiento, hay_posicion)
+                            if ULTIMO_CHAT_ID:
+                                bot.send_message(ULTIMO_CHAT_ID, texto, reply_markup=markup)
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle de trading automático: {e}")
@@ -542,7 +467,45 @@ def analizar_prediccion_5m(symbol):
     except Exception as e:
         print(f"Error en predicción 5m de {symbol}: {e}")
         return None
-def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market', zona_precio=None):
+def _rotar_dia():
+    global perdida_acumulada_dia, fecha_actual
+    hoy = time.strftime("%Y-%m-%d")
+    if hoy != fecha_actual:
+        perdida_acumulada_dia = 0.0
+        fecha_actual = hoy
+
+def registrar_resultado(pnl_usdt):
+    """Suma al límite diario solo las pérdidas REALES (antes se sumaba $1 por cada error de la API)."""
+    global perdida_acumulada_dia
+    _rotar_dia()
+    if pnl_usdt < 0:
+        perdida_acumulada_dia += -pnl_usdt
+
+def avisar(texto):
+    try:
+        if ULTIMO_CHAT_ID:
+            bot.send_message(ULTIMO_CHAT_ID, texto)
+    except Exception as e:
+        print(f"No pude enviar aviso a Telegram: {e}")
+
+def leer_posicion(ex, market_symbol):
+    """Posición abierta en MEXC para ese símbolo, o None si no hay."""
+    for p in ex.fetch_positions([market_symbol]) or []:
+        if p.get('symbol') != market_symbol:
+            continue
+        contratos = abs(float(p.get('contracts') or 0))
+        if contratos > 0:
+            return {
+                'contratos': contratos,
+                'lado': p.get('side'),
+                'entrada': float(p.get('entryPrice') or 0),
+                'apalancamiento': float(p.get('leverage') or 0),
+                'margen': float(p.get('initialMargin') or p.get('collateral') or 0),
+            }
+    return None
+
+def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, apalancamiento=1, tipo_orden='market',
+                                           zona_precio=None, sl_pct=None, tp_pct=None, precio_referencia=None):
     try:
         ex = crear_instancia_exchange(mercado)
         ex.load_markets()
@@ -550,202 +513,283 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         api, secret = obtener_credenciales_mexc()
         if not api or not secret:
             return False, 0, 0, 0, 0, 0, 0, "❌ **Error:** Faltan las credenciales de MEXC."
-        
-        global perdida_acumulada_dia, fecha_actual
-        hoy = time.strftime("%Y-%m-%d")
-        if hoy != fecha_actual:
-            perdida_acumulada_dia = 0.0
-            fecha_actual = hoy
-        
+
+        _rotar_dia()
         if perdida_acumulada_dia >= LIMITE_PERDIDA_DIARIA:
             return False, 0, 0, 0, 0, 0, 0, f"🛑 **BLOQUEO POR PÉRDIDA DIARIA:** Has alcanzado el límite de ${LIMITE_PERDIDA_DIARIA} USD."
 
-        # Candados de seguridad: solo ETH/ZEC en futuros y tope de margen por operación
+        # Candados de seguridad: solo ETH/ZEC en futuros, tope de margen y una posición por moneda
         if mercado != 'swap' or symbol not in MONEDAS_TRADING:
             return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** solo se permite operar {', '.join(MONEDAS_TRADING)} en Futuros."
         if margen_usdt <= 0 or margen_usdt > MARGEN_MAXIMO_USDT:
             return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** el margen máximo permitido por operación es ${MARGEN_MAXIMO_USDT}."
+        if symbol in posiciones_gestionadas:
+            return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** ya hay una posición abierta de {symbol} gestionada por el bot."
+        try:
+            if leer_posicion(ex, market_symbol):
+                return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** ya tienes una posición abierta de {symbol} en MEXC; no abro otra encima."
+        except Exception as e:
+            print(f"Aviso: no pude verificar posiciones abiertas de {symbol}: {e}")
 
-        if mercado == 'swap' and apalancamiento > 1:
-            try:
-                ex.set_leverage(apalancamiento, market_symbol)
-            except Exception as e:
-                print(f"Aviso de apalancamiento: {e}")
+        sl_pct = float(sl_pct) if sl_pct else SL_PORCENTAJE
+        tp_pct = float(tp_pct) if tp_pct else round(sl_pct * senales.TP_MULTIPLO_R, 2)
 
-        analisis = obtener_analisis_mexc(symbol, mercado)
-        precio_actual = analisis['precio']
-        soporte = analisis['soporte']
-        resistencia = analisis['resistencia']
+        precio_actual = float(ex.fetch_ticker(market_symbol)['last'])
+        if precio_referencia:
+            desvio = abs(precio_actual - precio_referencia) / precio_referencia * 100
+            if desvio > SENAL_MAX_DESVIO_PCT:
+                return False, 0, 0, 0, 0, 0, 0, (f"⏱️ **Señal vencida:** el precio se movió {desvio:.2f}% desde la señal "
+                                                  f"(${_p(precio_referencia)} → ${_p(precio_actual)}). Espera una señal nueva.")
 
         precio_objetivo = precio_actual
-        if tipo_orden == 'limit' and zona_precio:
+        if tipo_orden == 'limit' and zona_precio in ('soporte', 'resistencia'):
+            analisis = obtener_analisis_mexc(symbol, mercado)
+            if analisis.get('estado') == "FALLA EN EXCHANGE":
+                return False, 0, 0, 0, 0, 0, 0, "❌ **Error en MEXC:** no pude leer el soporte/resistencia. Intenta de nuevo."
             if zona_precio == 'soporte':
-                precio_objetivo = soporte
+                precio_objetivo = float(analisis['soporte'])
                 side = 'buy'
-            elif zona_precio == 'resistencia':
-                precio_objetivo = resistencia
+            else:
+                precio_objetivo = float(analisis['resistencia'])
                 side = 'sell'
 
-        sl_f = SL_PORCENTAJE / 100
-        tp_f = TP_PORCENTAJE / 100
-        if side == 'buy':
-            stop_loss = round(precio_objetivo * (1 - sl_f), 4)
-            take_profit = round(precio_objetivo * (1 + tp_f), 4)
-        else:
-            stop_loss = round(precio_objetivo * (1 + sl_f), 4)
-            take_profit = round(precio_objetivo * (1 - tp_f), 4)
+        # Apalancamiento y tipo de margen (MEXC exige openType y positionType)
+        lev_ok = True
+        if mercado == 'swap':
+            try:
+                ex.set_leverage(apalancamiento, market_symbol,
+                                params={'openType': TIPO_MARGEN_MEXC, 'positionType': 1 if side == 'buy' else 2})
+            except Exception as e:
+                lev_ok = False
+                print(f"Aviso de apalancamiento: {e}")
 
-        # Tamaño de la posición = margen x apalancamiento (antes, en órdenes de mercado se
-        # enviaba solo el margen, es decir, una posición sin apalancar).
-        amount_tokens = (margen_usdt * apalancamiento) / precio_objetivo
-        
-        monto_total_operacion = margen_usdt * apalancamiento
-        if monto_total_operacion < MONTO_MINIMO_USDT:
-            return False, 0, 0, 0, 0, 0, 0, f"⚠️ **MONTO INSUFICIENTE:** El monto total (${monto_total_operacion:.2f} USDT) es menor al mínimo (${MONTO_MINIMO_USDT} USDT)."
-        
-        if amount_tokens <= 0:
-            return False, 0, 0, 0, 0, 0, 0, "⚠️ **ERROR DE CÁLCULO:** El monto en tokens es 0 o negativo."
-        
+        sl_f, tp_f = sl_pct / 100, tp_pct / 100
+        if side == 'buy':
+            stop_loss = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - sl_f)))
+            take_profit = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 + tp_f)))
+        else:
+            stop_loss = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 + sl_f)))
+            take_profit = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - tp_f)))
+
+        # MEXC opera en CONTRATOS (p. ej. 1 contrato de ETH = 0.01 ETH), no en monedas
+        info_mercado = ex.market(market_symbol)
+        tam_contrato = float(info_mercado.get('contractSize') or 1.0)
+        min_contratos = float(((info_mercado.get('limits') or {}).get('amount') or {}).get('min') or 1.0)
+        contratos, error_tam = senales.dimensionar_contratos(
+            margen_usdt, apalancamiento, precio_objetivo, tam_contrato, min_contratos, MARGEN_MAXIMO_USDT)
+        if error_tam:
+            return False, 0, 0, 0, 0, 0, 0, f"⚠️ **TAMAÑO INSUFICIENTE:** {error_tam}"
+        cantidad = float(ex.amount_to_precision(market_symbol, contratos))
+        if cantidad <= 0:
+            return False, 0, 0, 0, 0, 0, 0, "⚠️ **ERROR DE CÁLCULO:** el tamaño quedó en 0 contratos. Sube el margen."
+        nocional = cantidad * tam_contrato * precio_objetivo
+        margen_real = nocional / apalancamiento
+        if nocional < MONTO_MINIMO_USDT:
+            return False, 0, 0, 0, 0, 0, 0, f"⚠️ **MONTO INSUFICIENTE:** el monto total (${nocional:.2f} USDT) es menor al mínimo (${MONTO_MINIMO_USDT} USDT)."
+
         params = {}
         if mercado == 'swap':
+            # ccxt NO traduce {'stopLoss': {...}} en MEXC swap (el stop no llegaba al exchange).
+            # Los campos propios de la API de MEXC son stopLossPrice / takeProfitPrice, y en margen
+            # aislado (openType=1) ccxt exige además 'leverage'.
             params = {
-                'stopLoss': {'triggerPrice': stop_loss},
-                'takeProfit': {'triggerPrice': take_profit}
+                'openType': TIPO_MARGEN_MEXC,
+                'leverage': int(apalancamiento),
+                'stopLossPrice': stop_loss,
+                'takeProfitPrice': take_profit,
+                'lossTrend': 1, 'profitTrend': 1,
             }
-            if tipo_orden == 'market' and side == 'buy':
-                params['createMarketBuyOrderRequiresPrice'] = False
-        else:
-            if tipo_orden == 'market' and side == 'buy':
-                params = {'createMarketBuyOrderRequiresPrice': False}
-
         if tipo_orden == 'market':
-            orden = ex.create_order(symbol=market_symbol, type='market', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
+            orden = ex.create_order(market_symbol, 'market', side, cantidad, None, params)
         else:
-            params['price'] = ex.price_to_precision(market_symbol, precio_objetivo)
-            orden = ex.create_order(symbol=market_symbol, type='limit', side=side, amount=ex.amount_to_precision(market_symbol, amount_tokens), params=params)
+            precio_limite = float(ex.price_to_precision(market_symbol, precio_objetivo))
+            orden = ex.create_order(market_symbol, 'limit', side, cantidad, precio_limite, params)
             precio_actual = precio_objetivo
 
-        return True, precio_actual, margen_usdt, apalancamiento, tipo_orden, stop_loss, take_profit, orden
+        precio_entrada = precio_actual
+        confirmada = None
+        if tipo_orden == 'market':
+            for _ in range(3):
+                try:
+                    confirmada = leer_posicion(ex, market_symbol)
+                except Exception as e:
+                    print(f"Aviso: no pude confirmar la posición: {e}")
+                if confirmada:
+                    break
+                time.sleep(1)
+            if confirmada and confirmada['entrada'] > 0:
+                precio_entrada = confirmada['entrada']
+            elif orden.get('average'):
+                precio_entrada = float(orden['average'])
+            # El stop que sigue al precio vive en el bot y se calcula desde el precio real de entrada
+            sl_virtual = precio_entrada * (1 - sl_f) if side == 'buy' else precio_entrada * (1 + sl_f)
+            pos = senales.nueva_posicion(side, precio_entrada, sl_virtual, take_profit)
+            pos.update({
+                'coin': symbol, 'market_symbol': market_symbol, 'margen': margen_real,
+                'apalancamiento': apalancamiento,
+                'contratos': confirmada['contratos'] if confirmada else cantidad,
+                'abierta_ts': time.time(), 'id': orden.get('id'),
+                'ultimo_precio': precio_entrada, 'sl_notificado': sl_virtual, 'aviso_error': 0,
+            })
+            posiciones_gestionadas[symbol] = pos
+
+        orden['_extra'] = {'contratos': cantidad, 'nocional': nocional, 'lev_ok': lev_ok,
+                           'sl_pct': sl_pct, 'tp_pct': tp_pct, 'confirmada': bool(confirmada)}
+        return True, precio_entrada, margen_real, apalancamiento, tipo_orden, stop_loss, take_profit, orden
     except Exception as e:
         error_str = str(e)
-        perdida_acumulada_dia += 1.0
         if "minimum amount" in error_str or "minimum" in error_str:
-            mensaje_amigable = "❌ **Error en MEXC:** El monto es menor al mínimo permitido (5 USDT)."
+            mensaje_amigable = "❌ **Error en MEXC:** el tamaño es menor al mínimo permitido."
         elif "balance" in error_str.lower() or "insufficient" in error_str.lower():
             mensaje_amigable = "❌ **Error en MEXC:** Saldo insuficiente en la billetera."
         else:
             mensaje_amigable = f"❌ **Error en MEXC:** {error_str}"
         return False, 0, 0, 0, 0, 0, 0, mensaje_amigable
 
-def actualizar_trailing_stop_en_mexc(orden_info, nuevo_sl):
-    try:
-        ex = crear_instancia_exchange(orden_info['mercado'])
-        market_symbol = orden_info['market_symbol']
-        ex.load_markets()
-        
-        try:
-            ex.cancel_all_orders(market_symbol, params={'trigger': True})
-        except Exception as e:
-            print(f"Aviso al cancelar SL anterior: {e}")
-        
-        side_cierre = 'sell' if orden_info['side'] == 'buy' else 'buy'
-        params_sl = {
-            'stopLoss': {'triggerPrice': nuevo_sl},
-            'reduceOnly': True
-        }
-        
-        cantidad = orden_info.get('cantidad', 0)
-        
-        if cantidad > 0:
-            ex.create_order(
-                symbol=market_symbol,
-                type='market',
-                side=side_cierre,
-                amount=ex.amount_to_precision(market_symbol, cantidad),
-                params=params_sl
-            )
-            print(f"Trailing Stop actualizado en MEXC para {orden_info['coin']}: ${nuevo_sl}")
-            return True
-    except Exception as e:
-        print(f"Error actualizando trailing stop en MEXC: {e}")
-    return False
+def texto_orden_ejecutada(titulo, coin, side, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado):
+    extra = resultado.get('_extra', {}) if isinstance(resultado, dict) else {}
+    direccion = "COMPRA (LONG) 🟢" if side == 'buy' else "VENTA (SHORT) 🔴"
+    lineas = [
+        f"✅ **{titulo}** ✅", "",
+        f"🪙 **Activo:** {coin}/USDT",
+        f"📈 **Dirección:** {direccion}",
+        f"💵 **Precio de Entrada:** ${_p(precio)}",
+        f"💰 **Margen:** ${margen_usado:.2f} USDT",
+        f"⚡ **Apalancamiento:** {lev_usado}x",
+    ]
+    if extra.get('contratos'):
+        lineas.append(f"📦 **Tamaño:** {extra['contratos']:g} contrato(s) (≈ ${extra['nocional']:.2f})")
+    lineas += [
+        f"📋 **Tipo:** {tipo_usado.upper()}", "",
+        f"🛑 **Stop Loss:** ${sl} ({extra.get('sl_pct', SL_PORCENTAJE)}%)",
+        f"🎯 **Take Profit (techo):** ${tp}",
+    ]
+    if tipo_usado == 'market':
+        lineas.append("📊 **Trailing Stop:** ACTIVO. El bot sube el stop con el precio. Revisa en MEXC que también aparezcan el SL y el TP.")
+        if not extra.get('confirmada', True):
+            lineas.append("⚠️ No pude ver la posición en MEXC todavía. Revisa la app del exchange.")
+    else:
+        lineas.append("📊 **Trailing Stop:** no aplica a órdenes límite (SL y TP fijos).")
+    if not extra.get('lev_ok', True):
+        lineas.append("⚠️ No pude confirmar el apalancamiento en MEXC; se usa el que tengas configurado ahí.")
+    lineas += ["", f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"]
+    return "\n".join(lineas)
 
-def bucle_monitoreo_ordenes():
+def finalizar_posicion(coin, pos, precio_salida, motivo):
+    pct, pnl = senales.pnl_estimado(pos['lado'], pos['entrada'], precio_salida, pos['margen'], pos['apalancamiento'])
+    registrar_resultado(pnl)
+    emoji = "🟢 GANANCIA" if pnl > 0 else "🔴 PÉRDIDA"
+    reporte = (
+        f"🎯 **OPERACIÓN CERRADA** 🎯\n\n"
+        f"🪙 **Activo:** {coin}/USDT\n"
+        f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if pos['lado'] == 'buy' else 'VENTA (SHORT) 🔴'}\n"
+        f"💵 **Entrada:** ${_p(pos['entrada'])}\n"
+        f"💵 **Salida (aprox.):** ${_p(precio_salida)}\n"
+        f"📌 **Motivo:** {motivo}\n"
+        f"💰 **Margen:** ${pos['margen']:.2f} USDT | ⚡ {pos['apalancamiento']}x\n\n"
+        f"{emoji}: **${pnl:.2f} USDT** ({pct:+.2f}% del precio, estimado antes de comisiones)\n"
+        f"📉 Pérdida acumulada hoy: ${perdida_acumulada_dia:.2f} / ${LIMITE_PERDIDA_DIARIA:.2f}"
+    )
+    try:
+        if ULTIMO_CHAT_ID:
+            bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
+    except Exception as e:
+        print(f"No pude enviar el reporte de cierre: {e}")
+    registrar_operacion(coin, 'market', pos['lado'], pos['entrada'], pos['margen'], pos['apalancamiento'],
+                        pos['sl'], 0, pos.get('id', 'N/A'), 'CERRADA')
+    posiciones_gestionadas.pop(coin, None)
+
+def cerrar_posicion_mercado(ex, pos):
+    """Cierra la posición con una orden de mercado que solo reduce (no puede abrir una contraria)."""
+    lado_cierre = 'sell' if pos['lado'] == 'buy' else 'buy'
+    ex.create_order(pos['market_symbol'], 'market', lado_cierre, pos['contratos'], None,
+                    {'reduceOnly': True, 'openType': TIPO_MARGEN_MEXC,
+                     'leverage': int(pos.get('apalancamiento') or APALANCAMIENTO_AUTO)})
+
+def gestionar_posicion(ex, coin, pos):
+    ms = pos['market_symbol']
+    try:
+        precio = float(ex.fetch_ticker(ms)['last'])
+    except Exception as e:
+        pos['errores_precio'] = pos.get('errores_precio', 0) + 1
+        print(f"Error leyendo precio de {coin}: {e}")
+        if pos['errores_precio'] == 5:
+            avisar(f"⚠️ No puedo leer el precio de {coin} en MEXC. El SL/TP que quedó puesto en MEXC sigue activo; revisa tu posición.")
+        return
+    pos['errores_precio'] = 0
+    pos['ultimo_precio'] = precio
+
+    leida, real = False, None
+    try:
+        real = leer_posicion(ex, ms)
+        leida = True
+    except Exception as e:
+        print(f"Error leyendo la posición de {coin}: {e}")
+    if leida and real is None and time.time() - pos['abierta_ts'] > GRACIA_POSICION_SEG:
+        finalizar_posicion(coin, pos, precio, "Cerrada en MEXC (SL/TP del exchange o cierre manual)")
+        return
+    if real:
+        pos['contratos'] = real['contratos']
+
+    accion, motivo = senales.avanzar_posicion(pos, precio)
+    if accion == 'CERRAR':
+        try:
+            cerrar_posicion_mercado(ex, pos)
+        except Exception as e:
+            print(f"Error cerrando {coin}: {e}")
+            if time.time() - pos.get('aviso_error', 0) > 300:
+                pos['aviso_error'] = time.time()
+                avisar(f"🚨 {coin}: el stop se activó ({motivo}) pero NO pude cerrar la posición: {e}\nCiérrala manualmente en MEXC.")
+            return
+        finalizar_posicion(coin, pos, precio, motivo)
+    elif accion == 'SUBIR_SL':
+        mejora = abs(pos['sl'] - pos['sl_notificado'])
+        if mejora >= 0.25 * pos['riesgo']:
+            pos['sl_notificado'] = pos['sl']
+            protegido = pos['sl'] >= pos['entrada'] if pos['lado'] == 'buy' else pos['sl'] <= pos['entrada']
+            avisar(f"📈 {coin}: stop ajustado a ${_p(pos['sl'])} "
+                   f"({'ganancia protegida ✅' if protegido else 'riesgo reducido'}). Precio actual: ${_p(precio)}")
+
+def bucle_gestion_posiciones():
+    """Revisa cada INTERVALO_GESTION_SEG el precio de las posiciones abiertas por el bot y mueve o activa el stop."""
     time.sleep(30)
     while True:
         try:
-            # Desactivado: tomaba el cierre de la orden de ENTRADA como cierre de la posición
-            # (reportaba "operación cerrada" al instante) y el trailing enviaba una orden de
-            # mercado. Se reescribe en el siguiente paso leyendo las posiciones reales de MEXC.
-            if ordenes_abiertas and TRAILING_ACTIVO:
-                for orden_info in ordenes_abiertas[:]:
+            if posiciones_gestionadas:
+                ex = crear_instancia_exchange('swap')
+                for coin, pos in list(posiciones_gestionadas.items()):
                     try:
-                        ex = crear_instancia_exchange(orden_info['mercado'])
-                        market_symbol = orden_info['market_symbol']
-                        orden_actual = ex.fetch_order(orden_info['id'], market_symbol)
-                        estado = orden_actual.get('status', 'open')
-                        
-                        if estado == 'open':
-                            try:
-                                ticker = ex.fetch_ticker(market_symbol)
-                                precio_actual = float(ticker['last'])
-                                precio_entrada = orden_info['precio_entrada']
-                                lado = orden_info['side']
-                                
-                                nuevo_sl = calcular_trailing_stop(precio_entrada, precio_actual, lado, 0.04)
-                                sl_anterior = orden_info.get('sl_actual', orden_info['sl_inicial'])
-                                
-                                actualizar = False
-                                if lado == 'buy' and nuevo_sl > sl_anterior:
-                                    actualizar = True
-                                elif lado == 'sell' and nuevo_sl < sl_anterior:
-                                    actualizar = True
-                                
-                                if actualizar:
-                                    if actualizar_trailing_stop_en_mexc(orden_info, nuevo_sl):
-                                        orden_info['sl_actual'] = nuevo_sl
-                                        print(f"Trailing Stop actualizado para {orden_info['coin']}: ${sl_anterior} → ${nuevo_sl}")
-                            except Exception as e:
-                                print(f"Error calculando Trailing Stop para {orden_info['coin']}: {e}")
-                        
-                        if estado in ['closed', 'canceled', 'filled']:
-                            precio_entrada = orden_info['precio_entrada']
-                            precio_salida = orden_actual.get('price', 0) or orden_actual.get('average', 0) or precio_entrada
-                            lado = orden_info['side']
-                            margen = orden_info['margen']
-                            apalancamiento = orden_info['apalancamiento']
-                            
-                            if lado == 'buy':
-                                pnl_pct = ((precio_salida - precio_entrada) / precio_entrada) * 100
-                            else:
-                                pnl_pct = ((precio_entrada - precio_salida) / precio_entrada) * 100
-                            
-                            pnl_usdt = margen * apalancamiento * (pnl_pct / 100)
-                            emoji_resultado = "🟢 GANANCIA" if pnl_usdt > 0 else "🔴 PÉRDIDA"
-                            
-                            reporte = (
-                                f"🎯 **OPERACIÓN CERRADA** 🎯\n\n"
-                                f"🪙 **Activo:** {orden_info['coin']}/USDT\n"
-                                f"⚙️ **Mercado:** Futuros\n"
-                                f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if lado == 'buy' else 'VENTA (SHORT) 🔴'}\n"
-                                f"💵 **Precio Entrada:** ${precio_entrada}\n"
-                                f"💵 **Precio Salida:** ${precio_salida}\n"
-                                f"💰 **Margen:** ${margen} USDT\n"
-                                f"⚡ **Apalancamiento:** {apalancamiento}x\n\n"
-                                f"{emoji_resultado}: **${pnl_usdt:.2f} USDT** ({pnl_pct:+.2f}%)\n\n"
-                                f"🆔 **ID:** `{orden_info['id']}`"
-                            )
-                            
-                            if ULTIMO_CHAT_ID:
-                                bot.send_message(ULTIMO_CHAT_ID, reporte, parse_mode="Markdown")
-                            
-                            registrar_operacion(orden_info['coin'], 'market', lado, precio_entrada, margen, apalancamiento, orden_info.get('sl_actual', 0), 0, orden_info['id'], 'CERRADA')
-                            ordenes_abiertas.remove(orden_info)
+                        gestionar_posicion(ex, coin, pos)
                     except Exception as e:
-                        print(f"Error monitoreando orden {orden_info.get('id', '?')}: {e}")
+                        print(f"Error gestionando {coin}: {e}")
         except Exception as e:
-            print(f"Error en bucle de monitoreo: {e}")
-        time.sleep(60)
+            print(f"Error en bucle de gestión de posiciones: {e}")
+        time.sleep(INTERVALO_GESTION_SEG)
+
+def avisar_posiciones_existentes():
+    """Tras un reinicio el bot pierde su memoria: si hay posiciones abiertas, pregunta si debe gestionarlas."""
+    time.sleep(25)
+    try:
+        ex = crear_instancia_exchange('swap')
+        for coin in MONEDAS_TRADING:
+            ms = f"{coin}/USDT:USDT"
+            p = leer_posicion(ex, ms)
+            if p and coin not in posiciones_gestionadas:
+                m = InlineKeyboardMarkup(row_width=2)
+                m.add(
+                    InlineKeyboardButton("✅ Gestionar con trailing", callback_data=f"adopt_{coin}"),
+                    InlineKeyboardButton("❌ Dejarla como está", callback_data=f"adopt_no_{coin}")
+                )
+                lado = "LONG" if p['lado'] == 'long' else "SHORT"
+                bot.send_message(DUENO_ID, (f"♻️ Reinicio del bot: veo una posición abierta de {coin} ({lado}, entrada ${_p(p['entrada'])}).\n"
+                                            f"¿Quieres que la gestione con stop de {SL_PORCENTAJE}% y trailing? "
+                                            f"Si no, queda como está, con el SL/TP que tenga en MEXC."), reply_markup=m)
+    except Exception as e:
+        print(f"No pude revisar posiciones existentes: {e}")
+
+def enviar_aviso_inicio():
+    avisar(f"🟢 Bot iniciado.\n• Operar: {', '.join(MONEDAS_TRADING)} | {APALANCAMIENTO_AUTO}x | margen ${MONTOS_PERMITIDOS[0]:.2f} o ${MONTOS_PERMITIDOS[1]:.2f}\n"
+           f"• Reportes cada 15 min: {', '.join(MONEDAS_REPORTE)}\n• Límite de pérdida diaria: ${LIMITE_PERDIDA_DIARIA:.2f}\n• Usa /estado para ver posiciones.")
 @bot.message_handler(commands=['start', 'menu'], func=es_dueno)
 def mostrar_menu_principal(message):
     global ULTIMO_CHAT_ID
@@ -759,7 +803,7 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
         InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE")
     )
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /estado - Posiciones y pérdida del día", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
@@ -793,6 +837,22 @@ def menu_predicciones(message):
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(*[InlineKeyboardButton(f"🔮 {c}", callback_data=f"pred_{c}") for c in MONEDAS_PREDICCION])
     bot.send_message(message.chat.id, "🔮 **PREDICCIONES 5 MINUTOS** 🔮\n\nElige el activo para analizar:", reply_markup=markup, parse_mode="Markdown")
+
+@bot.message_handler(commands=['estado'], func=es_dueno)
+def estado_posiciones(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    _rotar_dia()
+    lineas = ["📊 ESTADO DEL BOT", f"Pérdida acumulada hoy: ${perdida_acumulada_dia:.2f} / ${LIMITE_PERDIDA_DIARIA:.2f}", ""]
+    if not posiciones_gestionadas:
+        lineas.append("Sin posiciones abiertas gestionadas por el bot.")
+    for coin, p in posiciones_gestionadas.items():
+        largo = p['lado'] == 'buy'
+        ultimo = p.get('ultimo_precio', p['entrada'])
+        pct, pnl = senales.pnl_estimado(p['lado'], p['entrada'], ultimo, p['margen'], p['apalancamiento'])
+        lineas.append(f"{coin} {'LONG 🟢' if largo else 'SHORT 🔴'} | entrada ${_p(p['entrada'])} | último ${_p(ultimo)}")
+        lineas.append(f"   Stop del bot: ${_p(p['sl'])} | PnL aprox: {pct:+.2f}% (${pnl:+.2f})")
+    bot.send_message(message.chat.id, "\n".join(lineas))
 
 @bot.callback_query_handler(func=es_dueno)
 def callback_query(call):
@@ -832,8 +892,8 @@ def callback_query(call):
             else:
                 bot.send_message(call.message.chat.id, f"❌ No se pudo analizar {coin}.", parse_mode="Markdown")
 
-        # === REPORTE TÉCNICO POR MONEDA ===
-        elif accion == "ver" and len(datos) >= 2:
+        # === REPORTE TÉCNICO POR MONEDA / ANÁLISIS TÉCNICO ===
+        elif accion in ("ver", "ana") and len(datos) >= 2:
             coin = datos[1]
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
             analisis = obtener_analisis_con_reintentos(coin, 'swap')
@@ -842,46 +902,8 @@ def callback_query(call):
                 return
             t4h = obtener_tendencia_4h(coin, 'swap')
             sentimiento = obtener_sentimiento_mercado()
-            titulo_activo = f"Activo MEXC: {coin}/USDT"
-            
-            rep = (
-                "🔔 REPORTE TÉCNICO 🔔\n"
-                f"⚡ {titulo_activo}\n\n"
-                f"💵 Precio Actual: ${analisis['precio']}\n\n"
-                f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-                f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
-                f"📉 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-                f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
-                f"🧱 Resistencia: ${analisis['resistencia']}\n"
-                f"🟡 Soporte: ${analisis['soporte']}\n\n"
-                f"🎯 SEÑAL:\n• {analisis['estado']}\n• {analisis['pausa']}"
-            )
-            bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
-
-        # === ANÁLISIS TÉCNICO ===
-        elif accion == "ana" and len(datos) >= 2:
-            coin = datos[1]
-            bot.answer_callback_query(call.id, f"Analizando {coin}...")
-            analisis = obtener_analisis_con_reintentos(coin, 'swap')
-            if analisis.get('estado') == "FALLA EN EXCHANGE":
-                bot.send_message(call.message.chat.id, f"⚠️ MEXC no respondió para {coin}/USDT (error temporal del exchange). Intenta de nuevo en unos segundos.")
-                return
-            t4h = obtener_tendencia_4h(coin, 'swap')
-            sentimiento = obtener_sentimiento_mercado()
-            
-            rep = (
-                "🔔 ANÁLISIS TÉCNICO 🔔\n"
-                f"⚡ Activo MEXC: {coin}/USDT\n\n"
-                f"💵 Precio Actual: ${analisis['precio']}\n\n"
-                f"📊 MACRO (1H): {analisis['tendencia_1h']} | ADX: {analisis['adx_1h']} | RSI: {analisis['rsi_1h']}\n"
-                f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
-                f"📉 CORTO PLAZO (15M): {analisis['tendencia_15m']} | ADX: {analisis['adx_15m']} | RSI: {analisis['rsi_15m']}\n\n"
-                f"😱 **SENTIMIENTO:** {sentimiento['clasificacion']} ({sentimiento['valor']}/100)\n\n"
-                f"🧱 Resistencia: ${analisis['resistencia']}\n"
-                f"🟡 Soporte: ${analisis['soporte']}\n\n"
-                f"🎯 SEÑAL:\n• {analisis['estado']}\n• {analisis['pausa']}"
-            )
-            bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
+            titulo = "🔔 REPORTE TÉCNICO 🔔" if accion == "ver" else "🔔 ANÁLISIS TÉCNICO 🔔"
+            bot.send_message(call.message.chat.id, construir_reporte(titulo, coin, analisis, t4h, sentimiento), parse_mode="Markdown")
 
         # === CONFIRMACIÓN TRADING AUTOMÁTICO (Sí/No) ===
         elif accion == "conf" and len(datos) >= 3:
@@ -919,12 +941,15 @@ def callback_query(call):
             coin = datos[1]
             tipo = datos[2]
             monto = float(datos[3])
-            
+
             bot.answer_callback_query(call.id, f"Ejecutando {tipo} de {coin}...")
             msg_espera = bot.send_message(call.message.chat.id, f"⏳ **Ejecutando orden {tipo} para {coin}...**\nPor favor espera.", parse_mode="Markdown")
-            
+
             side = 'buy' if tipo == 'COMPRA' else 'sell'
-            
+            # SL/TP de la señal si sigue vigente; si no, los valores por defecto
+            pend = senales_pendientes.get((coin, tipo))
+            vigente = bool(pend) and (time.time() - pend['creada'] <= SENAL_VIGENCIA_SEG)
+
             exito, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado = ejecutar_orden_con_gestion_riesgo_real(
                 symbol=coin,
                 mercado='swap',
@@ -932,43 +957,55 @@ def callback_query(call):
                 margen_usdt=monto,
                 apalancamiento=APALANCAMIENTO_AUTO,
                 tipo_orden='market',
-                zona_precio=None
+                zona_precio=None,
+                sl_pct=pend['sl_pct'] if vigente else None,
+                tp_pct=pend['tp_pct'] if vigente else None,
+                precio_referencia=pend['precio'] if vigente else None
             )
-            
+
             bot.delete_message(call.message.chat.id, msg_espera.message_id)
-            
+
             if exito:
-                direccion = "COMPRA (LONG) 🟢" if side == 'buy' else "VENTA (SHORT) 🔴"
-                ordenes_abiertas.append({
-                    'id': resultado.get('id'),
-                    'coin': coin,
-                    'mercado': 'swap',
-                    'market_symbol': f"{coin}/USDT:USDT",
-                    'side': side,
-                    'precio_entrada': precio,
-                    'margen': margen_usado,
-                    'apalancamiento': lev_usado,
-                    'sl_inicial': sl,
-                    'sl_actual': sl,
-                    'cantidad': margen_usado * lev_usado / precio
-                })
                 registrar_operacion(coin, tipo_usado, side, precio, margen_usado, lev_usado, sl, tp, resultado.get('id', 'N/A'), 'ABIERTA')
-                rep = (
-                    f"✅ **¡ORDEN AUTOMÁTICA EJECUTADA!** ✅\n\n"
-                    f"🪙 **Activo:** {coin}/USDT\n"
-                    f"📈 **Dirección:** {direccion}\n"
-                    f"💵 **Precio de Entrada:** ${precio}\n"
-                    f"💰 **Margen:** ${margen_usado} USDT\n"
-                    f"⚡ **Apalancamiento:** {lev_usado}x\n"
-                    f"📋 **Tipo:** {tipo_usado.upper()}\n\n"
-                    f"🛑 **Stop Loss:** ${sl}\n"
-                    f"🎯 **Take Profit:** ${tp}\n"
-                    f"📊 **Trailing Stop:** en desarrollo (por ahora SL y TP fijos)\n\n"
-                    f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"
-                )
-                bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
+                senales_pendientes.pop((coin, tipo), None)
+                bot.send_message(call.message.chat.id, texto_orden_ejecutada("¡ORDEN AUTOMÁTICA EJECUTADA!", coin, side, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado), parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
+
+        # === GESTIONAR UNA POSICIÓN EXISTENTE TRAS UN REINICIO ===
+        elif accion == "adopt" and len(datos) >= 2:
+            if datos[1] == "no":
+                bot.answer_callback_query(call.id, "Queda como está.")
+                bot.send_message(call.message.chat.id, "👍 Ok, no la gestiono. Sigue con el SL/TP que tenga en MEXC.")
+                return
+            coin = datos[1]
+            if coin not in MONEDAS_TRADING or coin in posiciones_gestionadas:
+                bot.answer_callback_query(call.id, "No aplica.")
+                return
+            ex = crear_instancia_exchange('swap')
+            ms = f"{coin}/USDT:USDT"
+            p = leer_posicion(ex, ms)
+            if not p:
+                bot.answer_callback_query(call.id, "Ya no hay posición.")
+                bot.send_message(call.message.chat.id, f"ℹ️ Ya no veo una posición abierta de {coin}.")
+                return
+            lado = 'buy' if p['lado'] == 'long' else 'sell'
+            sl_f = SL_PORCENTAJE / 100
+            sl = p['entrada'] * (1 - sl_f) if lado == 'buy' else p['entrada'] * (1 + sl_f)
+            pos = senales.nueva_posicion(lado, p['entrada'], sl, None)
+            lev = p['apalancamiento'] or APALANCAMIENTO_AUTO
+            margen = p['margen'] or 0.0
+            if margen <= 0:
+                tam = float(ex.market(ms).get('contractSize') or 1.0)
+                margen = p['contratos'] * tam * p['entrada'] / lev
+            pos.update({'coin': coin, 'market_symbol': ms, 'margen': margen, 'apalancamiento': lev,
+                        'contratos': p['contratos'], 'abierta_ts': 0, 'id': 'adoptada',
+                        'ultimo_precio': p['entrada'], 'sl_notificado': sl, 'aviso_error': 0})
+            posiciones_gestionadas[coin] = pos
+            bot.answer_callback_query(call.id, "Gestionando...")
+            bot.send_message(call.message.chat.id,
+                             f"✅ Gestiono tu posición de {coin}. Stop inicial ${_p(sl)} ({SL_PORCENTAJE}% desde tu entrada); "
+                             f"sube con el precio. Si el precio ya está más allá del stop, se cerrará en el próximo chequeo.")
 
         # === MENÚ FUTUROS ===
         elif call.data == "menu_futuros":
@@ -1007,8 +1044,13 @@ def callback_query(call):
             if tipo_o == "market":
                 bot.answer_callback_query(call.id, "Selecciona margen...")
                 m_mar_fut = InlineKeyboardMarkup(row_width=3)
+                m_mar_fut.row_width = 2
                 m_mar_fut.add(*[
-                    InlineKeyboardButton(f"${mt:.2f}", callback_data=f"ejec_fut_{coin}_{lev}_market_none_{mt}")
+                    InlineKeyboardButton(f"🟢 LONG ${mt:.2f}", callback_data=f"ejec_fut_{coin}_{lev}_market_none_{mt}")
+                    for mt in MONTOS_PERMITIDOS
+                ])
+                m_mar_fut.add(*[
+                    InlineKeyboardButton(f"🔴 SHORT ${mt:.2f}", callback_data=f"ejec_fut_{coin}_{lev}_market_short_{mt}")
                     for mt in MONTOS_PERMITIDOS
                 ])
                 bot.send_message(call.message.chat.id, f"💵 **Margen para Mercado {coin} ({lev}x):**", reply_markup=m_mar_fut, parse_mode="Markdown")
@@ -1029,52 +1071,26 @@ def callback_query(call):
             tipo_orden = datos[4]
             zona = datos[5]
             margen = float(datos[6])
+            side_manual = 'buy' if zona in ['none', 'soporte'] else 'sell'
 
             msg_espera = bot.send_message(call.message.chat.id, f"⏳ **Ejecutando orden {tipo_orden.upper()} para {coin}...**", parse_mode="Markdown")
             mercado_ccxt = 'swap' if mercado_tipo == 'fut' else 'spot'
-            
+
             exito, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado = ejecutar_orden_con_gestion_riesgo_real(
                 symbol=coin,
                 mercado=mercado_ccxt,
-                side='buy' if zona in ['none', 'soporte'] else 'sell',
+                side=side_manual,
                 margen_usdt=margen,
                 apalancamiento=lev,
                 tipo_orden=tipo_orden,
-                zona_precio=zona if zona != 'none' else None
+                zona_precio=zona if zona in ('soporte', 'resistencia') else None
             )
 
             bot.delete_message(call.message.chat.id, msg_espera.message_id)
 
             if exito:
-                direccion = "COMPRA (LONG) 🟢" if (zona in ['none', 'soporte'] or resultado['side'] == 'buy') else "VENTA (SHORT) 🔴"
-                ordenes_abiertas.append({
-                    'id': resultado.get('id'),
-                    'coin': coin,
-                    'mercado': mercado_ccxt,
-                    'market_symbol': f"{coin}/USDT:USDT" if mercado_ccxt == 'swap' else f"{coin}/USDT",
-                    'side': 'buy' if zona in ['none', 'soporte'] else 'sell',
-                    'precio_entrada': precio,
-                    'margen': margen_usado,
-                    'apalancamiento': lev_usado,
-                    'sl_inicial': sl,
-                    'sl_actual': sl,
-                    'cantidad': margen_usado * lev_usado / precio
-                })
-                registrar_operacion(coin, tipo_usado, 'buy' if zona in ['none', 'soporte'] else 'sell', precio, margen_usado, lev_usado, sl, tp, resultado.get('id', 'N/A'), 'ABIERTA')
-                rep = (
-                    f"✅ **¡ORDEN EJECUTADA CON ÉXITO!** ✅\n\n"
-                    f"🪙 **Activo:** {coin}/USDT\n"
-                    f"📈 **Dirección:** {direccion}\n"
-                    f"💵 **Precio de Entrada:** ${precio}\n"
-                    f"💰 **Margen:** ${margen_usado} USDT\n"
-                    f"⚡ **Apalancamiento:** {lev_usado}x\n"
-                    f"📋 **Tipo:** {tipo_usado.upper()}\n\n"
-                    f"🛑 **Stop Loss:** ${sl}\n"
-                    f"🎯 **Take Profit:** ${tp}\n"
-                    f"📊 **Trailing Stop:** en desarrollo (por ahora SL y TP fijos)\n\n"
-                    f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"
-                )
-                bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
+                registrar_operacion(coin, tipo_usado, side_manual, precio, margen_usado, lev_usado, sl, tp, resultado.get('id', 'N/A'), 'ABIERTA')
+                bot.send_message(call.message.chat.id, texto_orden_ejecutada("¡ORDEN EJECUTADA CON ÉXITO!", coin, side_manual, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado), parse_mode="Markdown")
             else:
                 bot.send_message(call.message.chat.id, f"❌ **Fallo al ejecutar:**\n\n{resultado}", parse_mode="Markdown")
 
@@ -1120,14 +1136,17 @@ def iniciar_hilos():
     hilo_keep_alive.start()
     hilo_reportes = threading.Thread(target=bucle_reportes_automaticos, daemon=True)
     hilo_reportes.start()
-    hilo_monitoreo = threading.Thread(target=bucle_monitoreo_ordenes, daemon=True)
-    hilo_monitoreo.start()
+    hilo_gestion = threading.Thread(target=bucle_gestion_posiciones, daemon=True)
+    hilo_gestion.start()
+    hilo_reinicio = threading.Thread(target=avisar_posiciones_existentes, daemon=True)
+    hilo_reinicio.start()
     hilo_trading = threading.Thread(target=bucle_trading_automatico, daemon=True)
     hilo_trading.start()
 
 if __name__ == "__main__":
     print("Iniciando Bot...")
     inicializar_mercados()
+    enviar_aviso_inicio()
     iniciar_hilos()
     hilo_bot = threading.Thread(target=lambda: bot.infinity_polling(), daemon=True)
     hilo_bot.start()
