@@ -10,6 +10,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 import indicadores
 import senales
+import prediccion
 
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
@@ -48,7 +49,7 @@ MONTO_MINIMO_USDT = 5.0  # mínimo del tamaño total de la posición (margen x a
 
 # --- Parámetros de operación (cuenta real, montos pequeños) ---
 APALANCAMIENTO_AUTO = 20          # apalancamiento de las señales automáticas
-MONTOS_PERMITIDOS = [1.5, 3.0]    # botones de margen en USDT
+MONTOS_PERMITIDOS = [1.0, 2.0, 3.0]  # botones de margen en USDT
 MARGEN_MAXIMO_USDT = float(os.getenv("MARGEN_MAXIMO_USDT", "5"))  # tope de seguridad por operación
 # 1 = margen aislado (lo máximo que pierdes es el margen de la operación), 2 = cruzado.
 TIPO_MARGEN_MEXC = int(os.getenv("MEXC_OPEN_TYPE", "1"))
@@ -382,87 +383,43 @@ def bucle_trading_automatico():
         time.sleep(15)
 
 def analizar_prediccion_5m(symbol):
+    """Misma pantalla de siempre, ahora con probabilidades de subir/bajar (ver prediccion.py)."""
     try:
         ex = crear_instancia_exchange('swap')
         market_symbol = f"{symbol}/USDT:USDT"
-        
-        ohlcv_5m = ex.fetch_ohlcv(market_symbol, timeframe='5m', limit=30)
-        closes_5m = [x[4] for x in ohlcv_5m]
-        highs_5m = [x[2] for x in ohlcv_5m]
-        lows_5m = [x[3] for x in ohlcv_5m]
-        volumes_5m = [x[5] for x in ohlcv_5m]
-        
-        adx_5m = calcular_adx(highs_5m, lows_5m, closes_5m)
-        rsi_5m = calcular_rsi(closes_5m)
-        
-        precio_actual = closes_5m[-1]
-        precio_anterior = closes_5m[-2]
-        precio_hace5 = closes_5m[-6]
-        
-        volumen_promedio = sum(volumes_5m[-11:-1]) / 10
-        volumen_actual = volumes_5m[-1]
-        
-        sma5 = sum(closes_5m[-5:]) / 5
-        sma10 = sum(closes_5m[-10:]) / 10
-        
-        puntos_alcista = 0
-        puntos_bajista = 0
-        
-        if precio_actual > sma5:
-            puntos_alcista += 1
-        else:
-            puntos_bajista += 1
-        
-        if sma5 > sma10:
-            puntos_alcista += 1
-        else:
-            puntos_bajista += 1
-        
-        if rsi_5m > 55:
-            puntos_alcista += 1
-        elif rsi_5m < 45:
-            puntos_bajista += 1
-        
-        if adx_5m > 20:
-            if precio_actual > precio_anterior:
-                puntos_alcista += 1
-            else:
-                puntos_bajista += 1
-        
-        if volumen_actual > volumen_promedio:
-            if precio_actual > precio_anterior:
-                puntos_alcista += 1
-            else:
-                puntos_bajista += 1
-        
-        if precio_actual > precio_hace5:
-            puntos_alcista += 1
-        else:
-            puntos_bajista += 1
-        
-        if puntos_alcista > puntos_bajista:
-            prediccion = "VA A SUBIR 📈"
-            emoji = "🟢"
-        elif puntos_bajista > puntos_alcista:
-            prediccion = "VA A BAJAR 📉"
-            emoji = "🔴"
-        else:
-            prediccion = "LATERAL / SIN DIRECCIÓN CLARA 😐"
-            emoji = "🟡"
-        
+        ahora = int(time.time() * 1000)
+        crudas5 = ex.fetch_ohlcv(market_symbol, timeframe='5m', since=ahora - 130 * 300000, limit=130)
+        crudas15 = ex.fetch_ohlcv(market_symbol, timeframe='15m', since=ahora - 80 * 900000, limit=80)
+        crudas1h = ex.fetch_ohlcv(market_symbol, timeframe='1h', since=ahora - 100 * 3600000, limit=100)
+        est = prediccion.estimar(
+            senales.solo_cerradas(crudas5, 300000, ahora),
+            senales.solo_cerradas(crudas15, 900000, ahora),
+            senales.solo_cerradas(crudas1h, 3600000, ahora))
+        if est is None:
+            return None
+        etiquetas = {"SUBE": ("VA A SUBIR 📈", "🟢"), "BAJA": ("VA A BAJAR 📉", "🔴"),
+                     "LATERAL": ("LATERAL / SIN DIRECCIÓN CLARA 😐", "🟡")}
+        texto, emoji = etiquetas[est['direccion']]
+        closes = [x[4] for x in crudas5]
         return {
             'symbol': symbol,
-            'precio': precio_actual,
-            'prediccion': prediccion,
+            'precio': closes[-1],
+            'prediccion': texto,
             'emoji': emoji,
-            'rsi': round(rsi_5m, 1),
-            'adx': round(adx_5m, 1),
-            'sma5': round(sma5, 4),
-            'sma10': round(sma10, 4),
-            'puntos_alcista': puntos_alcista,
-            'puntos_bajista': puntos_bajista,
-            'volumen': volumen_actual,
-            'volumen_promedio': volumen_promedio
+            'rsi': round(est['rsi'], 1),
+            'adx': round(est['adx'], 1),
+            'sma5': round(sum(closes[-5:]) / 5, 4),
+            'sma10': round(sum(closes[-10:]) / 10, 4),
+            'puntos_alcista': est['puntos_alcista'],
+            'puntos_bajista': est['puntos_bajista'],
+            'volumen': est['volumen'],
+            'volumen_promedio': est['volumen_promedio'],
+            'prob_sube': est['prob_sube'],
+            'prob_baja': est['prob_baja'],
+            'confianza': est['confianza'],
+            'atr_pct': est['atr_pct'],
+            'lateral': est['lateral'],
+            'factores': est['factores'],
         }
     except Exception as e:
         print(f"Error en predicción 5m de {symbol}: {e}")
@@ -878,15 +835,22 @@ def callback_query(call):
                     f"🔮 **PREDICCIÓN 5 MINUTOS** 🔮\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
                     f"💵 **Precio Actual:** ${pred['precio']}\n\n"
-                    f"{pred['emoji']} **PREDICCIÓN:** {pred['prediccion']}\n\n"
+                    f"{pred['emoji']} **PREDICCIÓN:** {pred['prediccion']}\n"
+                    f"📊 **Probabilidad:** ⬆️ {pred['prob_sube']}% sube | ⬇️ {pred['prob_baja']}% baja\n"
+                    f"🎚️ **Confianza:** {pred['confianza']}"
+                    f"{' (mercado lateral: ADX bajo)' if pred['lateral'] else ''}\n\n"
                     f"📊 **RSI (5m):** {pred['rsi']}\n"
                     f"📊 **ADX (5m):** {pred['adx']}\n"
                     f"📈 **SMA5:** ${pred['sma5']}\n"
                     f"📉 **SMA10:** ${pred['sma10']}\n"
-                    f"📊 **Volumen:** {pred['volumen']:.0f} (prom: {pred['volumen_promedio']:.0f})\n\n"
+                    f"📊 **Volumen:** {pred['volumen']:.0f} (prom: {pred['volumen_promedio']:.0f})\n"
+                    f"📏 **Movimiento típico (ATR 5m):** ±{pred['atr_pct']:.2f}%\n\n"
                     f"🎯 **Puntos Alcistas:** {pred['puntos_alcista']}\n"
                     f"🎯 **Puntos Bajistas:** {pred['puntos_bajista']}\n\n"
-                    f"⚠️ *Este análisis es informativo, el bot no ejecuta órdenes aquí.*"
+                    f"🧮 **Factores:**\n"
+                    + "\n".join(f"{'🟢' if voto > 0 else ('🔴' if voto < 0 else '⚪')} {nombre}" for nombre, voto, _ in pred['factores'])
+                    + "\n\n"
+                    f"⚠️ *Es una probabilidad estimada con indicadores, no una certeza. El bot no ejecuta órdenes aquí.*"
                 )
                 bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
             else:
