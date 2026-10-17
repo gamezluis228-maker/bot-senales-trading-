@@ -11,6 +11,7 @@ from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 import indicadores
 import senales
 import prediccion
+import historial
 
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
@@ -377,6 +378,7 @@ def bucle_trading_automatico():
                             texto = construir_mensaje_senal(coin, senal, sentimiento, hay_posicion)
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, texto, reply_markup=markup)
+                            registrar_senal_historial(coin, senal)
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle de trading automático: {e}")
@@ -420,6 +422,7 @@ def analizar_prediccion_5m(symbol):
             'atr_pct': est['atr_pct'],
             'lateral': est['lateral'],
             'factores': est['factores'],
+            'direccion': est['direccion'],
         }
     except Exception as e:
         print(f"Error en predicción 5m de {symbol}: {e}")
@@ -760,7 +763,7 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
         InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE")
     )
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /estado - Posiciones y pérdida del día", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /estado - Posiciones y pérdida del día\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
@@ -811,6 +814,76 @@ def estado_posiciones(message):
         lineas.append(f"   Stop del bot: ${_p(p['sl'])} | PnL aprox: {pct:+.2f}% (${pnl:+.2f})")
     bot.send_message(message.chat.id, "\n".join(lineas))
 
+def registrar_prediccion_historial(coin, pred):
+    try:
+        ts = int(time.time() * 1000)
+        historial.registrar({
+            'id': f"pred-{coin}-{ts // 300000}", 'tipo': 'prediccion', 'symbol': coin,
+            'direccion': pred['direccion'], 'precio': float(pred['precio']), 'ts': ts,
+            'prob_sube': pred['prob_sube'], 'prob_baja': pred['prob_baja'],
+            'confianza': pred['confianza'], 'atr_pct': pred['atr_pct']})
+    except Exception as e:
+        print(f"No pude registrar la predicción en el historial: {e}")
+
+def registrar_senal_historial(coin, s):
+    try:
+        historial.registrar({
+            'id': f"senal-{coin}-{s['subtipo']}-{int(s['ts'])}", 'tipo': 'senal', 'symbol': coin,
+            'tipo_orden': s['tipo'], 'direccion': s['tipo'], 'precio': float(s['precio']),
+            'ts': int(time.time() * 1000), 'veredicto': s['veredicto'], 'subtipo': s['subtipo'],
+            'sl_pct': float(s['sl_pct']), 'tp_pct': float(s['tp_pct']),
+            'puntos': s['puntos'], 'total': s['total']})
+    except Exception as e:
+        print(f"No pude registrar la señal en el historial: {e}")
+
+def resolver_pendientes():
+    """Evalúa con datos reales de MEXC las predicciones (a 5 min) y las señales (SL o TP primero)."""
+    ahora = int(time.time() * 1000)
+    pendientes = historial.pendientes(ahora)
+    if not pendientes:
+        return
+    ex = crear_instancia_exchange('swap')
+    for ev in pendientes:
+        ms = f"{ev['symbol']}/USDT:USDT"
+        try:
+            if ev['tipo'] == 'prediccion':
+                precio = float(ex.fetch_ticker(ms)['last'])
+                historial.actualizar(ev['id'], historial.evaluar_prediccion(ev, precio, ahora))
+            else:
+                inicio = (ev['ts'] // 300000 + 1) * 300000  # primera vela de 5m completa tras la señal
+                velas = [v for v in ex.fetch_ohlcv(ms, timeframe='5m', since=inicio, limit=60) if v[0] >= inicio]
+                res = historial.simular_senal(ev['tipo_orden'], ev['precio'], ev['sl_pct'], ev['tp_pct'], velas)
+                if res:
+                    historial.actualizar(ev['id'], {'resultado': res})
+                elif ahora - ev['ts'] > historial.HORIZONTE_SENAL_MS:
+                    historial.actualizar(ev['id'], {'resultado': 'NEUTRO'})
+        except Exception as e:
+            print(f"No pude evaluar {ev.get('id')}: {e}")
+
+def bucle_historial():
+    """Cada 15 min registra en silencio una predicción de BTC, ETH y ZEC y evalúa las pendientes."""
+    time.sleep(45)
+    ultimo_registro = {}
+    while True:
+        try:
+            ahora = time.time()
+            for coin in MONEDAS_REPORTE:
+                if ahora - ultimo_registro.get(coin, 0) >= 900:
+                    ultimo_registro[coin] = ahora
+                    pred = analizar_prediccion_5m(coin)
+                    if pred:
+                        registrar_prediccion_historial(coin, pred)
+            resolver_pendientes()
+        except Exception as e:
+            print(f"Error en el historial de aciertos: {e}")
+        time.sleep(60)
+
+@bot.message_handler(commands=['aciertos'], func=es_dueno)
+def ver_aciertos(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    bot.send_message(message.chat.id, historial.resumen_texto())
+
 @bot.callback_query_handler(func=es_dueno)
 def callback_query(call):
     global ULTIMO_CHAT_ID
@@ -831,6 +904,7 @@ def callback_query(call):
             bot.delete_message(call.message.chat.id, msg.message_id)
             
             if pred:
+                registrar_prediccion_historial(coin, pred)
                 rep = (
                     f"🔮 **PREDICCIÓN 5 MINUTOS** 🔮\n\n"
                     f"🪙 **Activo:** {coin}/USDT\n"
@@ -1106,6 +1180,8 @@ def iniciar_hilos():
     hilo_reinicio.start()
     hilo_trading = threading.Thread(target=bucle_trading_automatico, daemon=True)
     hilo_trading.start()
+    hilo_historial = threading.Thread(target=bucle_historial, daemon=True)
+    hilo_historial.start()
 
 if __name__ == "__main__":
     print("Iniciando Bot...")

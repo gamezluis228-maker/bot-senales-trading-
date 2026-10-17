@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .env
 registro_operaciones.txt
+historial_aciertos.jsonl
+historial_aciertos.jsonl.tmp
