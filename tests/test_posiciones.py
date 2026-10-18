@@ -102,5 +102,30 @@ check("posición no gestionada se indica como tal", "NO la está gestionando" in
 pos["modo"] = "vigilar"
 check("modo vigilar aclara que el bot no cierra nada", "NO cierra nada" in P.texto_posicion("ETH", pos, 3030.0, 1.5, 20))
 
+# --- consulta al tocar el stop ---------------------------------------------------------------------------
+base = {"largo": True, "precio": 100.0, "ema9": 101.0, "ema21": 100.0, "rsi15": 50.0, "vol_rel": 1.0, "cuerpo_contra": False,
+        "mecha_rechazo": 0.1, "tend1h": "NEUTRAL", "tend4h": "NEUTRAL", "tend_btc": None, "ema50_1h": 95.0}
+contra = dict(base, ema9=99.0, ema21=100.0, cuerpo_contra=True, vol_rel=2.0, tend1h="BAJISTA", tend4h="BAJISTA", tend_btc="BAJISTA", ema50_1h=105.0)
+d = P.diagnostico_stop("buy", contra)
+check("long con todo en contra => recomienda CERRAR", d["recomendacion"] == "CERRAR" and len(d["contra"]) >= 5)
+resp = dict(base, tend1h="ALCISTA", mecha_rechazo=0.7, rsi15=24.0, cuerpo_contra=True, vol_rel=0.6)
+d = P.diagnostico_stop("buy", resp)
+check("long con rechazo, RSI estirado, poco volumen y 1H a favor => MANTENER", d["recomendacion"] == "MANTENER" and len(d["respiro"]) >= 3)
+check("evidencia mixta => DUDA (con 20x se recomienda cerrar)", P.diagnostico_stop("buy", dict(base, tend1h="BAJISTA"))["recomendacion"] == "DUDA")
+s_contra = dict(contra, largo=False, ema9=101.0, ema21=100.0, tend1h="ALCISTA", tend4h="ALCISTA", tend_btc="ALCISTA", ema50_1h=95.0, precio=100.0)
+check("short con todo en contra => CERRAR", P.diagnostico_stop("sell", s_contra)["recomendacion"] == "CERRAR")
+check("short: RSI sobrecomprado + rechazo => respiro", "RSI" in " ".join(P.diagnostico_stop("sell", dict(base, largo=False, rsi15=78.0, mecha_rechazo=0.6, ema9=99.0, ema21=100.0))["respiro"]))
+
+def _velas(cierres, tf):
+    return [[i * tf, c, c * 1.002, c * 0.998, c, 100.0] for i, c in enumerate(cierres)]
+r = P.rasgos_stop("buy", _velas([100 + i * 0.1 for i in range(80)], 900000), _velas([100 + i * 0.5 for i in range(80)], 3600000))
+check("rasgos_stop calcula EMAs, RSI y tendencia 1H", r and r["tend1h"] == "ALCISTA" and r["ema9"] > 0 and 0 <= r["rsi15"] <= 100)
+check("rasgos_stop sin datos suficientes => None", P.rasgos_stop("buy", [], []) is None)
+pos_t, _ = P.crear_posicion_adoptada("buy", 100.0, 98.4, 1.5); pos_t.update(margen=1.5, apalancamiento=20)
+t = P.texto_consulta("ETH", pos_t, 98.4, P.diagnostico_stop("buy", contra), 97.8, "STOP LOSS")
+check("el mensaje de consulta dice que NO cerró, recomienda y avisa del tiempo de espera",
+      "NO he cerrado nada" in t and "Recomiendo CERRAR" in t and "3 min" in t and "97.80" in t)
+check("con recomendación MANTENER, la espera mantiene (no cierra)", "mantengo hasta el stop de emergencia" in P.texto_consulta("ETH", pos_t, 98.4, P.diagnostico_stop("buy", resp), 97.8, "STOP LOSS"))
+
 print(f"\n{ok} OK, {fails} fallos")
 sys.exit(1 if fails else 0)

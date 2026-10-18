@@ -623,6 +623,13 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             stop_loss = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 + sl_f)))
             take_profit = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - tp_f)))
 
+        # Stop de emergencia en MEXC: más lejos que el stop normal del bot, para que el bot te CONSULTE al tocar el normal
+        if tipo_orden == 'market':
+            f_duro = (sl_pct + posiciones.EXTRA_STOP_DURO_PCT) / 100
+            stop_mexc = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - f_duro) if side == 'buy' else precio_objetivo * (1 + f_duro)))
+        else:
+            stop_mexc = stop_loss
+
         # MEXC opera en CONTRATOS (p. ej. 1 contrato de ETH = 0.01 ETH), no en monedas
         info_mercado = ex.market(market_symbol)
         tam_contrato = float(info_mercado.get('contractSize') or 1.0)
@@ -647,7 +654,7 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             params = {
                 'openType': TIPO_MARGEN_MEXC,
                 'leverage': int(apalancamiento),
-                'stopLossPrice': stop_loss,
+                'stopLossPrice': stop_mexc,
                 'takeProfitPrice': take_profit,
                 'lossTrend': 1, 'profitTrend': 1,
             }
@@ -772,6 +779,68 @@ def cerrar_posicion_mercado(ex, pos):
         params['positionId'] = pos['position_id']
     ex.create_order(pos['market_symbol'], 'market', lado_cierre, pos['contratos'], None, params)
 
+def _pasado(lado, precio, nivel):
+    """El precio ya está en el nivel o más allá, en contra de la posición."""
+    return precio <= nivel if lado == 'buy' else precio >= nivel
+
+def _a_favor_de(lado, precio, nivel, distancia):
+    return precio >= nivel + distancia if lado == 'buy' else precio <= nivel - distancia
+
+def _cerrar_y_finalizar(ex, coin, pos, precio, motivo):
+    try:
+        cerrar_posicion_mercado(ex, pos)
+    except Exception as e:
+        print(f"Error cerrando {coin}: {e}")
+        if time.time() - pos.get('aviso_error', 0) > 300:
+            pos['aviso_error'] = time.time()
+            avisar(f"🚨 {coin}: el stop se activó ({motivo}) pero NO pude cerrar la posición: {e}\nCiérrala manualmente en MEXC.")
+        return False
+    finalizar_posicion(coin, pos, precio, motivo)
+    return True
+
+def evaluar_stop(coin, pos):
+    """Lee el mercado y devuelve el diagnóstico (cambio real vs respiro), o None si no pudo."""
+    try:
+        v15, v1h, v4h, vbtc = obtener_velas_zona(coin)
+        r = posiciones.rasgos_stop(pos['lado'], v15, v1h, v4h, vbtc)
+        return posiciones.diagnostico_stop(pos['lado'], r) if r else None
+    except Exception as e:
+        print(f"No pude evaluar el stop de {coin}: {e}")
+        return None
+
+def activar_stop_duro(coin, pos, auto=False):
+    """«Mantener»: el stop pasa al nivel de emergencia (EXTRA_STOP_DURO_PCT más lejos)."""
+    extra = pos['entrada'] * posiciones.EXTRA_STOP_DURO_PCT / 100
+    pos['sl_blando'] = pos['sl']
+    pos['sl_duro'] = pos['sl'] - extra if pos['lado'] == 'buy' else pos['sl'] + extra
+    pos['sl_duro_activo'] = True
+    pos.pop('consulta', None)
+    enviar_dueno(("🤖 Sin respuesta y con pinta de respiro: " if auto else "✋ ") + f"mantengo {coin}. "
+                 f"Cierro solo si llega a ${_p(pos['sl_duro'])} (stop de emergencia). Si el precio se recupera, vuelvo al stop normal.")
+
+def decidir_cierre(coin, pos, precio, motivo):
+    """Cuando el precio toca el stop: CONSULTA primero. Devuelve el motivo si hay que cerrar YA, o None."""
+    ahora = time.time()
+    extra = pos['entrada'] * posiciones.EXTRA_STOP_DURO_PCT / 100
+    sl_duro = pos['sl'] - extra if pos['lado'] == 'buy' else pos['sl'] + extra
+    c = pos.get('consulta')
+    if c is None:
+        d = evaluar_stop(coin, pos) or {'recomendacion': 'DUDA', 'contra': [], 'respiro': [], 'score': 0, 'sin_datos': True}
+        pos['consulta'] = {'ts': ahora, 'rec': d['recomendacion']}
+        m = InlineKeyboardMarkup(row_width=2)
+        m.add(InlineKeyboardButton("✅ Cerrar ahora", callback_data=f"pos_clok_{coin}"),
+              InlineKeyboardButton("✋ Mantener", callback_data=f"pos_mt_{coin}"))
+        enviar_dueno(posiciones.texto_consulta(coin, pos, precio, d, sl_duro, motivo, gestion_en_mexc=not pos.get('adoptada')), m)
+        return None
+    if _pasado(pos['lado'], precio, sl_duro):
+        return "STOP DE EMERGENCIA (el precio siguió en contra mientras esperaba tu respuesta)"
+    if ahora - c['ts'] >= posiciones.CONSULTA_ESPERA_SEG:
+        if c['rec'] == 'MANTENER':
+            activar_stop_duro(coin, pos, auto=True)
+            return None
+        return f"{motivo} (sin respuesta en {posiciones.CONSULTA_ESPERA_SEG // 60} min: cerré para proteger tu capital)"
+    return None
+
 def gestionar_posicion(ex, coin, pos):
     ms = pos['market_symbol']
     try:
@@ -802,17 +871,26 @@ def gestionar_posicion(ex, coin, pos):
         vigilar_movimiento(coin, pos, precio)      # solo avisa; no cierra nada por su cuenta
         return
 
-    accion, motivo = senales.avanzar_posicion(pos, precio)
-    if accion == 'CERRAR':
-        try:
-            cerrar_posicion_mercado(ex, pos)
-        except Exception as e:
-            print(f"Error cerrando {coin}: {e}")
-            if time.time() - pos.get('aviso_error', 0) > 300:
-                pos['aviso_error'] = time.time()
-                avisar(f"🚨 {coin}: el stop se activó ({motivo}) pero NO pude cerrar la posición: {e}\nCiérrala manualmente en MEXC.")
+    if pos.get('sl_duro_activo'):
+        if _pasado(pos['lado'], precio, pos['sl_duro']):
+            _cerrar_y_finalizar(ex, coin, pos, precio, "STOP DE EMERGENCIA (decidiste mantener y el precio siguió en contra)")
             return
-        finalizar_posicion(coin, pos, precio, motivo)
+        if _a_favor_de(pos['lado'], precio, pos['sl_blando'], 0.5 * pos['riesgo']):
+            pos['sl_duro_activo'] = False
+            pos['sl'] = pos['sl_blando']
+            enviar_dueno(f"✅ {coin}: el precio se recuperó. Vuelvo al stop normal (${_p(pos['sl'])}).")
+        else:
+            vigilar_movimiento(coin, pos, precio)
+            return
+
+    accion, motivo = senales.avanzar_posicion(pos, precio)
+    if accion != 'CERRAR' and pos.get('consulta'):
+        pos.pop('consulta', None)
+        enviar_dueno(f"✅ {coin}: el precio volvió por encima del stop. Falsa alarma; sigo vigilando.")
+    if accion == 'CERRAR':
+        cerrar_con = decidir_cierre(coin, pos, precio, motivo)
+        if cerrar_con:
+            _cerrar_y_finalizar(ex, coin, pos, precio, cerrar_con)
         return
     if accion == 'SUBIR_SL':
         mejora = abs(pos['sl'] - pos['sl_notificado'])
@@ -1082,6 +1160,17 @@ def accion_posicion(call, datos):
               InlineKeyboardButton("↩️ No, mantener", callback_data=f"pos_clno_{coin}"))
         bot.answer_callback_query(call.id, "Confirma el cierre.")
         bot.send_message(chat, f"⚠️ ¿Cierro {coin} a mercado ahora?\n\n" + texto, reply_markup=m)
+
+    elif sub == 'mt':
+        pos = posiciones_gestionadas.get(coin)
+        if not pos or pos.get('modo', 'trailing') == 'vigilar':
+            bot.answer_callback_query(call.id, "No hay nada que mantener.")
+            return
+        if pos.get('sl_duro_activo'):
+            bot.answer_callback_query(call.id, "Ya la mantengo.")
+            return
+        bot.answer_callback_query(call.id, "Mantengo la posición.")
+        activar_stop_duro(coin, pos)
 
     elif sub == 'clno':
         bot.answer_callback_query(call.id, "Se mantiene abierta.")
@@ -1462,7 +1551,8 @@ def callback_query(call):
                              f"⚠️ CONFIRMA LA OPERACIÓN (dinero real)\n\n"
                              f"🪙 {coin}/USDT | {'COMPRA (LONG)' if tipo == 'COMPRA' else 'VENTA (SHORT)'}\n"
                              f"💰 Margen: ${monto:g} × {APALANCAMIENTO_AUTO}x = posición de ≈ ${monto * APALANCAMIENTO_AUTO:g}\n"
-                             f"🛡️ SL {sl_txt} | el stop sube con el precio\n\n"
+                             f"🛡️ SL {sl_txt} | el stop sube con el precio\n"
+                             f"🔔 Al tocar el stop te CONSULTO antes de cerrar; en MEXC queda un stop de emergencia {posiciones.EXTRA_STOP_DURO_PCT:g}% más lejos.\n\n"
                              "Si no pulsas Confirmar, no se ejecuta nada.", reply_markup=m)
 
         # === MONTO SELECCIONADO (ejecutar con el apalancamiento automático) ===

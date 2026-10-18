@@ -4,6 +4,9 @@ Se prueba con datos simulados:  python3 tests/test_posiciones.py
 """
 import math
 
+import numpy as np
+
+import indicadores as ind
 import senales
 
 ESCALON_PNL_PCT = 10.0          # avisa cada 10 % de ganancia/pérdida sobre el MARGEN
@@ -13,6 +16,8 @@ GANANCIA_MIN_EMA_PCT = 0.5      # el cruce de EMAs solo cuenta si ya vas ganando
 GANANCIA_MIN_RSI_PCT = 1.0      # el agotamiento del RSI solo cuenta si ya vas ganando 1 %
 RSI_AGOTADO_LONG = 75
 RSI_AGOTADO_SHORT = 25
+EXTRA_STOP_DURO_PCT = 0.5       # el stop de emergencia (en MEXC) queda 0.5 % más lejos que el stop normal
+CONSULTA_ESPERA_SEG = 180       # tiempo que el bot espera tu respuesta cuando el precio toca el stop
 SEPARACION_MIN_ASEGURAR_PCT = 0.1   # el precio debe estar 0.1 % más allá del nuevo stop
 
 
@@ -143,4 +148,87 @@ def texto_posicion(coin, pos, precio, margen, apalancamiento, liquidacion=None, 
     if liquidacion:
         d = abs(precio - liquidacion) / precio * 100
         L.append(f"⚠️ Liquidación ≈ ${fmt_precio(liquidacion)} (a {d:.2f}% del precio)")
+    return "\n".join(L)
+
+
+# --- Consulta al tocar el stop ------------------------------------------------------------------------
+def rasgos_stop(lado, v15, v1h, v4h=None, vbtc=None):
+    """Datos objetivos para decidir si el golpe al stop es un cambio real de tendencia o solo un respiro.
+    Velas cerradas [ts, o, h, l, c, v]. Devuelve None si faltan datos."""
+    if len(v15) < 30 or len(v1h) < 55:
+        return None
+    largo = lado == "buy"
+    a = np.asarray(v15, dtype=float)
+    c = a[:, 4]
+    o, h, l, cl, vol = a[-1, 1], a[-1, 2], a[-1, 3], a[-1, 4], a[-1, 5]
+    rango = (h - l) or 1e-12
+    vol_prom = float(a[-21:-1, 5].mean())
+    c1 = [x[4] for x in v1h]
+    mecha_favor = (min(o, cl) - l) / rango if largo else (h - max(o, cl)) / rango
+    return {
+        "largo": largo, "precio": float(cl),
+        "ema9": ind.ultima_ema(c, 9), "ema21": ind.ultima_ema(c, 21), "rsi15": ind.rsi(c, 14),
+        "vol_rel": float(vol / vol_prom) if vol_prom > 0 else 1.0,
+        "cuerpo_contra": bool(cl < o) if largo else bool(cl > o),
+        "mecha_rechazo": float(mecha_favor),
+        "tend1h": senales.tendencia(c1),
+        "tend4h": senales.tendencia([x[4] for x in v4h]) if v4h else "NEUTRAL",
+        "tend_btc": senales.tendencia([x[4] for x in vbtc]) if vbtc else None,
+        "ema50_1h": ind.ultima_ema(c1, 50),
+    }
+
+
+def diagnostico_stop(lado, r):
+    """Pesa evidencia EN CONTRA (cambio real) vs A FAVOR del respiro. Devuelve dict con recomendacion
+    ('CERRAR' / 'MANTENER' / 'DUDA'), contra, respiro y score. Es una estimación, no una garantía:
+    con 20x ante la duda se recomienda cerrar."""
+    largo = lado == "buy"
+    mal, bien = [], []
+    if (largo and r["ema9"] < r["ema21"]) or ((not largo) and r["ema9"] > r["ema21"]):
+        mal.append("EMAs 9/21 (15m) apuntan en contra")
+    adverso = "BAJISTA" if largo else "ALCISTA"
+    favor = "ALCISTA" if largo else "BAJISTA"
+    if r["tend1h"] == adverso:
+        mal.append("Tendencia 1H en contra de tu posición")
+    elif r["tend1h"] == favor:
+        bien.append("La tendencia 1H sigue a tu favor")
+    if r["tend4h"] == adverso:
+        mal.append("Tendencia 4H en contra")
+    if r["tend_btc"] == adverso:
+        mal.append("BTC se mueve en contra")
+    if r["cuerpo_contra"] and r["vol_rel"] >= 1.5:
+        mal.append(f"Vela 15m en contra con volumen alto (x{r['vol_rel']:.1f}): empuje real")
+    if (largo and r["precio"] < r["ema50_1h"]) or ((not largo) and r["precio"] > r["ema50_1h"]):
+        mal.append("El precio perdió la EMA 50 (1H)")
+    if r["mecha_rechazo"] >= 0.5:
+        bien.append("Mecha larga de rechazo en la última vela 15m")
+    if (largo and r["rsi15"] <= 30) or ((not largo) and r["rsi15"] >= 70):
+        bien.append(f"RSI 15m en {r['rsi15']:.0f}: movimiento estirado, posible rebote")
+    if r["cuerpo_contra"] and r["vol_rel"] < 1.0:
+        bien.append("El empujón en contra viene con poco volumen")
+    score = len(mal) - len(bien)
+    rec = "CERRAR" if score >= 2 else ("MANTENER" if score <= -2 else "DUDA")
+    return {"recomendacion": rec, "contra": mal, "respiro": bien, "score": score}
+
+
+def texto_consulta(coin, pos, precio, diag, sl_duro, motivo, gestion_en_mexc=True):
+    """Mensaje que se envía cuando el precio toca el stop: análisis y recomendación. No se ha cerrado nada."""
+    rec = diag["recomendacion"]
+    consejo = {"CERRAR": "💡 Recomiendo CERRAR: el mercado parece ir en serio en contra.",
+               "MANTENER": "💡 Recomiendo MANTENER: parece un respiro, no un cambio de tendencia.",
+               "DUDA": "💡 Sin señal clara: con 20x lo prudente es CERRAR para proteger tu capital."}[rec]
+    L = [f"⚠️ {coin}: el precio tocó tu stop ({motivo}) en ${fmt_precio(pos['sl'])}.",
+         "NO he cerrado nada: decide tú.", ""]
+    L.append(texto_posicion(coin, pos, precio, pos["margen"], pos["apalancamiento"], pos.get("liquidacion")))
+    L.append("")
+    if diag.get("sin_datos"):
+        L.append("No pude leer el mercado para analizarlo.")
+    else:
+        L.append("🔴 En contra: " + ("; ".join(diag["contra"]) if diag["contra"] else "nada relevante"))
+        L.append("🟢 A favor del respiro: " + ("; ".join(diag["respiro"]) if diag["respiro"] else "nada relevante"))
+    L += ["", consejo, "(Es una estimación, no una garantía.)", "",
+          f"🛑 Si pulsas Mantener, el stop de emergencia queda en ${fmt_precio(sl_duro)}"
+          + (" (también puesto en MEXC)." if gestion_en_mexc else "."),
+          f"⏱️ Si no respondes en {CONSULTA_ESPERA_SEG // 60} min: "
+          + ("mantengo hasta el stop de emergencia." if rec == "MANTENER" else "cierro para protegerte.")]
     return "\n".join(L)
