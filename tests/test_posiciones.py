@@ -127,5 +127,14 @@ check("el mensaje de consulta dice que NO cerró, recomienda y avisa del tiempo 
       "NO he cerrado nada" in t and "Recomiendo CERRAR" in t and "3 min" in t and "97.80" in t and "NO cierro nada" in t)
 check("con recomendación MANTENER, la espera mantiene (no cierra)", "mantengo hasta el stop de emergencia" in P.texto_consulta("ETH", pos_t, 98.4, P.diagnostico_stop("buy", resp), 97.8, "STOP LOSS"))
 
+# --- operaciones activas -------------------------------------------------------------------------------------
+pa = P.parsear_posicion({"symbol": "ETH/USDT:USDT", "contracts": 1, "side": "long", "entryPrice": 3000.0, "leverage": 20, "initialMargin": 1.5, "info": {}})
+li = P.linea_activa(pa, 3030.0)
+check("línea de operación activa: moneda, lado, 20x y variación", "ETH LONG 20x" in li and "+20.0%" in li and "+0.30" in li)
+check("conteo de operaciones activas", P.texto_activas([li, li]).startswith("📌 Operaciones activas en MEXC Futuros: 2"))
+check("sin operaciones dice 0", "Futuros: 0" in P.texto_activas([]))
+ps = P.parsear_posicion({"symbol": "ZEC/USDT:USDT", "contracts": 3, "side": "short", "entryPrice": 50.0, "leverage": 20, "initialMargin": 2.0, "info": {}})
+check("short con el precio subiendo se ve en rojo", "🔴 ZEC SHORT" in P.linea_activa(ps, 51.0))
+
 print(f"\n{ok} OK, {fails} fallos")
 sys.exit(1 if fails else 0)

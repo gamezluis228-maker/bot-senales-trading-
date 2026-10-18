@@ -232,3 +232,21 @@ def texto_consulta(coin, pos, precio, diag, sl_duro, motivo, gestion_en_mexc=Tru
           f"⏱️ Si no respondes en {CONSULTA_ESPERA_SEG // 60} min NO cierro nada: mantengo hasta el stop de emergencia "
           "(ese es tu límite de pérdida)."]
     return "\n".join(L)
+
+
+def linea_activa(p, precio):
+    """Una línea por operación abierta: moneda, lado, apalancamiento y variación actual."""
+    lado = lado_orden(p["lado"])
+    lev = p["apalancamiento"] or 1
+    v = variacion(lado, p["entrada"], precio, p["margen"], lev)
+    signo = "🟢" if v["pnl_usdt"] >= 0 else "🔴"
+    return (f"{signo} {p['coin']} {'LONG' if lado == 'buy' else 'SHORT'} {lev:g}x · entrada ${fmt_precio(p['entrada'])} "
+            f"· ahora ${fmt_precio(precio)} · {v['pct_margen']:+.1f}% del margen (≈ ${v['pnl_usdt']:+.2f})")
+
+
+def texto_activas(lineas):
+    """Encabezado con el conteo de operaciones activas + una línea por operación."""
+    n = len(lineas)
+    if n == 0:
+        return "📭 Operaciones activas en MEXC Futuros: 0"
+    return f"📌 Operaciones activas en MEXC Futuros: {n}\n" + "\n".join(f"• {x}" for x in lineas)

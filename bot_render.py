@@ -1212,6 +1212,39 @@ def accion_posicion(call, datos):
     else:
         bot.answer_callback_query(call.id, "Opción no reconocida.")
 
+def types_msg(call):
+    """Convierte un callback en algo con .chat.id para reutilizar los comandos."""
+    class _M:
+        chat = call.message.chat
+    return _M()
+
+def resumen_activas():
+    """(n, texto) de las operaciones abiertas en MEXC Futuros. n es None si no se pudo leer."""
+    try:
+        ex = crear_instancia_exchange('swap')
+        abiertas = leer_todas_las_posiciones(ex)
+        lineas = []
+        for p in abiertas:
+            try:
+                precio = float(ex.fetch_ticker(p['market_symbol'])['last'])
+                lineas.append(posiciones.linea_activa(p, precio))
+            except Exception as e:
+                lineas.append(f"{p['coin']} {p['lado']} (no pude leer su precio: {e})")
+        return len(abiertas), posiciones.texto_activas(lineas)
+    except Exception as e:
+        return None, f"⚠️ No pude leer tus operaciones en MEXC ahora mismo ({e})."
+
+@bot.message_handler(commands=['activas'], func=es_dueno)
+def cmd_activas(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    n, texto = resumen_activas()
+    m = None
+    if n:
+        m = InlineKeyboardMarkup(row_width=1)
+        m.add(InlineKeyboardButton("🎛️ Ver con botones (cerrar, asegurar...)", callback_data="activas_ver"))
+    bot.send_message(message.chat.id, texto, reply_markup=m)
+
 @bot.message_handler(commands=['posiciones'], func=es_dueno)
 def ver_posiciones(message):
     global ULTIMO_CHAT_ID
@@ -1248,7 +1281,10 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
         InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE")
     )
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
+    n_activas, _ = resumen_activas()
+    markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
+    linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + ("no pude leerlas ahora" if n_activas is None else str(n_activas)))
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
@@ -1600,6 +1636,18 @@ def callback_query(call):
                 accion_posicion(call, ['padopt', datos[1], 'trailing'])
 
         # === POSICIONES: botones del monitoreo ===
+        elif accion == "activas":
+            bot.answer_callback_query(call.id, "Leyendo tus operaciones...")
+            if datos[1:2] == ["ver"]:
+                ver_posiciones(types_msg(call))
+            else:
+                n, texto = resumen_activas()
+                m = None
+                if n:
+                    m = InlineKeyboardMarkup(row_width=1)
+                    m.add(InlineKeyboardButton("🎛️ Ver con botones (cerrar, asegurar...)", callback_data="activas_ver"))
+                bot.send_message(call.message.chat.id, texto, reply_markup=m)
+
         elif accion in ("pos", "padopt", "pign"):
             accion_posicion(call, datos)
 
