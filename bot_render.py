@@ -13,6 +13,7 @@ import senales
 import posiciones
 import prediccion
 import historial
+import avisos
 
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
@@ -59,6 +60,7 @@ TIPO_MARGEN_MEXC = int(os.getenv("MEXC_OPEN_TYPE", "1"))
 SL_PORCENTAJE = 1.5               # SL por defecto (operaciones manuales o sin señal vigente)
 SENAL_VIGENCIA_SEG = 5400         # una señal se puede operar con los botones durante 90 min
 SENAL_MAX_DESVIO_PCT = 0.8        # si el precio se movió más que esto desde la señal, no se opera
+INTERVALO_AVISOS_SEG = 300         # el bot busca puntos de entrada y niveles vigilados cada 5 min
 INTERVALO_GESTION_SEG = 20        # cada cuánto el bot revisa el precio de tus posiciones
 GRACIA_POSICION_SEG = 90          # tiempo para que MEXC muestre una posición recién abierta
 INTERVALO_DETECCION_SEG = 60      # cada cuánto busca posiciones abiertas que el bot no gestiona (p. ej. las tuyas)
@@ -69,6 +71,8 @@ posiciones_avisadas = {}          # moneda -> (lado, entrada) de la posición ya
 ultima_orden_ts = {}              # moneda -> cuándo el bot envió su última orden (evita ofrecer lo que acaba de abrir)
 _lock_pos = threading.RLock()
 senales_pendientes = {}           # (moneda, tipo) -> señal que puedes operar con los botones
+avisos_hoy = {'fecha': '', 'n': 0}  # contador diario de avisos de entrada (anti-ruido)
+ultima_zona = {}                  # (moneda, tipo) -> hora del último aviso de zona
 senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
 MONEDAS_TRADING = ["ETH", "ZEC"]
@@ -250,13 +254,13 @@ def detectar_rompimiento(symbol, mercado='swap'):
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
         ahora = int(time.time() * 1000)
-        v1h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='1h', limit=300), 3600000, ahora)
-        v4h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='4h', limit=120), 14400000, ahora)
+        v1h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='1h', since=ahora - 300 * 3600000, limit=300), 3600000, ahora)
+        v4h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='4h', since=ahora - 120 * 14400000, limit=120), 14400000, ahora)
         vbtc = None
         if symbol != 'BTC':
             try:
                 btc_symbol = "BTC/USDT:USDT" if mercado == 'swap' else "BTC/USDT"
-                vbtc = senales.solo_cerradas(ex.fetch_ohlcv(btc_symbol, timeframe='1h', limit=120), 3600000, ahora)
+                vbtc = senales.solo_cerradas(ex.fetch_ohlcv(btc_symbol, timeframe='1h', since=ahora - 120 * 3600000, limit=120), 3600000, ahora)
             except Exception as e:
                 print(f"No pude leer BTC como contexto: {e}")
         return senales.evaluar(symbol, v1h, v4h, vbtc)
@@ -324,7 +328,7 @@ def construir_mensaje_senal(coin, s, sentimiento, hay_posicion=False):
         f"{s['emoji']} {s['titulo']}",
         f"📌 {s['descripcion']}",
         f"🪙 Activo: {coin}/USDT",
-        f"💵 Precio (cierre 1H): ${_p(s['precio'])} | Nivel: ${_p(s['nivel'])}",
+        f"💵 Precio (cierre {s.get('tf', '1H')}): ${_p(s['precio'])} | Nivel: ${_p(s['nivel'])}",
         f"🏁 Calidad: {s['puntos']}/{s['total']} puntos",
         "",
         "Verificación:",
@@ -334,7 +338,7 @@ def construir_mensaje_senal(coin, s, sentimiento, hay_posicion=False):
     lineas += [
         "",
         f"📐 EMA 20/50/200 (1H): ${_p(s['ema20'])} / ${_p(s['ema50'])} / ${_p(s['ema200'])}",
-        f"📊 RSI (1H): {s['rsi']} | ADX (1H): {s['adx']}",
+        f"📊 RSI ({s.get('tf', '1H')}): {s['rsi']} | ADX (1H): {s['adx']}",
         f"📈 Tendencia 4H (EMA 20/50): {s['tendencia_4h']}",
         f"😱 Sentimiento: {sentimiento['clasificacion']} ({sentimiento['valor']}/100)",
         "",
@@ -345,7 +349,7 @@ def construir_mensaje_senal(coin, s, sentimiento, hay_posicion=False):
             f"🎯 Dirección sugerida: {direccion}",
             f"🛡️ Plan: SL {s['sl_pct']}% | TP techo {s['tp_pct']}% | el stop sube con el precio | {APALANCAMIENTO_AUTO}x",
             "",
-            "¿Quieres operar?",
+            "👇 Elige con cuánto operar (un toque abre la orden real con stop y take profit):",
         ]
     elif hay_posicion:
         lineas.append("Ya hay una posición abierta de esta moneda.")
@@ -371,24 +375,103 @@ def bucle_trading_automatico():
                                 continue
                             senales_enviadas[clave] = senal['ts']
                             hay_posicion = coin in posiciones_gestionadas
-                            accionable = senal['veredicto'] in ('VERDADERO', 'PROBABLE') and not hay_posicion
+                            registrar_senal_historial(coin, senal)      # todas se registran (para /aciertos)
+                            cfg = avisos.config()
+                            if not cfg['activo'] or not avisos.pasa_filtro(senal['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
+                                continue
                             markup = None
-                            if accionable:
+                            if not hay_posicion:
                                 senales_pendientes[(coin, senal['tipo'])] = dict(senal, creada=time.time())
-                                markup = InlineKeyboardMarkup(row_width=2)
-                                markup.add(
-                                    InlineKeyboardButton("✅ Sí, operar", callback_data=f"conf_{coin}_{senal['tipo']}"),
-                                    InlineKeyboardButton("❌ No operar", callback_data=f"conf_no_{coin}_{senal['tipo']}")
-                                )
+                                markup = teclado_entrada(coin, senal['tipo'])
                             sentimiento = obtener_sentimiento_mercado()
                             texto = construir_mensaje_senal(coin, senal, sentimiento, hay_posicion)
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, texto, reply_markup=markup)
-                            registrar_senal_historial(coin, senal)
+                            avisos_hoy['n'] += 1
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle de trading automático: {e}")
         time.sleep(15)
+
+def teclado_entrada(coin, tipo):
+    """Un toque = orden real con ese margen (usa el callback 'mont_' de siempre)."""
+    m = InlineKeyboardMarkup(row_width=3)
+    m.add(*[InlineKeyboardButton(f"Operar ${x:g}", callback_data=f"mont_{coin}_{tipo}_{x}") for x in MONTOS_PERMITIDOS])
+    m.add(InlineKeyboardButton("📊 Ver análisis", callback_data=f"ver_{coin}"),
+          InlineKeyboardButton("❌ Ignorar", callback_data=f"conf_no_{coin}_{tipo}"))
+    return m
+
+def _cupo_avisos():
+    hoy = time.strftime("%Y-%m-%d")
+    if avisos_hoy['fecha'] != hoy:
+        avisos_hoy.update(fecha=hoy, n=0)
+    return avisos.cupo_disponible(avisos_hoy['n'])
+
+def obtener_velas_zona(coin, ex=None):
+    """Velas CERRADAS para evaluar el punto de entrada: 15m, 1H, 4H y BTC 1H (contexto)."""
+    ex = ex or crear_instancia_exchange('swap')
+    ahora = int(time.time() * 1000)
+    ms = f"{coin}/USDT:USDT"
+    v15 = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='15m', since=ahora - 120 * 900000, limit=120), 900000, ahora)
+    v1h = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='1h', since=ahora - 300 * 3600000, limit=300), 3600000, ahora)
+    v4h = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='4h', since=ahora - 120 * 14400000, limit=120), 14400000, ahora)
+    vbtc = None
+    if coin != 'BTC':
+        try:
+            vbtc = senales.solo_cerradas(ex.fetch_ohlcv("BTC/USDT:USDT", timeframe='1h', since=ahora - 120 * 3600000, limit=120), 3600000, ahora)
+        except Exception as e:
+            print(f"No pude leer BTC como contexto: {e}")
+    return v15, v1h, v4h, vbtc
+
+def revisar_zonas(ex):
+    """Busca puntos de entrada (retroceso a la EMA 21 con rebote) en ETH y ZEC y avisa con botones."""
+    cfg = avisos.config()
+    if not cfg['activo']:
+        return
+    for coin in MONEDAS_TRADING:
+        try:
+            if coin in posiciones_gestionadas:
+                continue
+            v15, v1h, v4h, vbtc = obtener_velas_zona(coin, ex)
+            for s in avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc):
+                clave = (coin, s['tipo'])
+                ahora = time.time()
+                if not avisos.pasa_filtro(s['veredicto'], 'normal') or not avisos.puede_repetir(ultima_zona.get(clave), ahora):
+                    continue
+                ultima_zona[clave] = ahora
+                registrar_senal_historial(coin, s)
+                if not avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
+                    continue
+                senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
+                texto = "📍 PUNTO DE ENTRADA 📍\n\n" + construir_mensaje_senal(coin, s, obtener_sentimiento_mercado())
+                enviar_dueno(texto, teclado_entrada(coin, s['tipo']))
+                avisos_hoy['n'] += 1
+        except Exception as e:
+            print(f"Error buscando zona de entrada en {coin}: {e}")
+
+def revisar_vigilancias_bot(ex):
+    cfg = avisos.config()
+    if not cfg['vigilancias']:
+        return
+    precios = {}
+    for coin in {v['coin'] for v in cfg['vigilancias']}:
+        try:
+            precios[coin] = float(ex.fetch_ticker(f"{coin}/USDT:USDT")['last'])
+        except Exception as e:
+            print(f"No pude leer el precio de {coin}: {e}")
+    for v in avisos.revisar_vigilancias(precios):
+        enviar_dueno(f"🔔 {v['coin']} llegó a tu nivel ${_p(v['nivel'])} (ahora ${_p(v['precio'])}).\nMira /mercado para ver si hay punto de entrada.")
+
+def bucle_avisos_dinamicos():
+    time.sleep(45)
+    while True:
+        try:
+            ex = crear_instancia_exchange('swap')
+            revisar_vigilancias_bot(ex)
+            revisar_zonas(ex)
+        except Exception as e:
+            print(f"Error en avisos dinámicos: {e}")
+        time.sleep(INTERVALO_AVISOS_SEG)
 
 def analizar_prediccion_5m(symbol):
     """Misma pantalla de siempre, ahora con probabilidades de subir/bajar (ver prediccion.py)."""
@@ -1061,7 +1144,7 @@ def ver_posiciones(message):
             bot.send_message(message.chat.id, f"⚠️ No pude mostrar {p['coin']}: {e}")
 
 def enviar_aviso_inicio():
-    avisar(f"🟢 Bot iniciado.\n• Operar: {', '.join(MONEDAS_TRADING)} | {APALANCAMIENTO_AUTO}x | margen ${MONTOS_PERMITIDOS[0]:.2f} o ${MONTOS_PERMITIDOS[1]:.2f}\n"
+    avisar(f"🟢 Bot iniciado.\n• Operar: {', '.join(MONEDAS_TRADING)} | {APALANCAMIENTO_AUTO}x | margen {' / '.join(f'${m:g}' for m in MONTOS_PERMITIDOS)}\n"
            f"• Reportes cada 15 min: {', '.join(MONEDAS_REPORTE)}\n• Límite de pérdida diaria: ${LIMITE_PERDIDA_DIARIA:.2f}\n• Usa /posiciones para ver y manejar tus posiciones.")
 @bot.message_handler(commands=['start', 'menu'], func=es_dueno)
 def mostrar_menu_principal(message):
@@ -1076,7 +1159,7 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
         InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE")
     )
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
@@ -1190,6 +1273,81 @@ def bucle_historial():
         except Exception as e:
             print(f"Error en el historial de aciertos: {e}")
         time.sleep(60)
+
+@bot.message_handler(commands=['senales'], func=es_dueno)
+def cmd_senales(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    arg = (message.text.split()[1:] or [''])[0].lower()
+    if arg in ('on', 'off'):
+        avisos.poner_activo(arg == 'on')
+    c = avisos.config()
+    bot.send_message(message.chat.id,
+                     f"🔔 Avisos de entrada: {'ACTIVADOS ✅' if c['activo'] else 'PAUSADOS ⏸️'}\n"
+                     f"Sensibilidad: {c['sensibilidad'].upper()}\nAvisos enviados hoy: {avisos_hoy['n']}/{avisos.MAX_AVISOS_DIA}\n\n"
+                     "Uso: /senales on | /senales off\nCambiar rigor: /sensibilidad estricta | normal")
+
+@bot.message_handler(commands=['sensibilidad'], func=es_dueno)
+def cmd_sensibilidad(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    arg = (message.text.split()[1:] or [''])[0].lower()
+    if arg and not avisos.poner_sensibilidad(arg):
+        bot.send_message(message.chat.id, "Usa: /sensibilidad estricta  o  /sensibilidad normal")
+        return
+    c = avisos.config()
+    bot.send_message(message.chat.id,
+                     f"🎚️ Sensibilidad actual: {c['sensibilidad'].upper()}\n"
+                     "• estricta: solo avisa señales VERDADERAS (pocas, más fiables)\n"
+                     "• normal: avisa también las PROBABLES (más avisos, menos fiables)\n\n"
+                     "Cambiar: /sensibilidad estricta | normal")
+
+@bot.message_handler(commands=['vigilar'], func=es_dueno)
+def cmd_vigilar(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    args = message.text.split()[1:]
+    chat = message.chat.id
+    if args and args[0].lower() in ('borrar', 'off'):
+        n = avisos.borrar_vigilancias(args[1] if len(args) > 1 else None) if len(args) > 1 else avisos.borrar_vigilancias(None)
+        bot.send_message(chat, f"🗑️ Vigilancias borradas: {n}")
+        return
+    if len(args) >= 2:
+        coin = args[0].upper()
+        try:
+            nivel = float(args[1].replace(',', '.'))
+            precio = float(crear_instancia_exchange('swap').fetch_ticker(f"{coin}/USDT:USDT")['last'])
+        except Exception:
+            bot.send_message(chat, "No pude leer ese precio. Ejemplo: /vigilar ETH 3500")
+            return
+        ok, msg = avisos.agregar_vigilancia(coin, nivel, precio)
+        if ok:
+            bot.send_message(chat, f"👀 Vigilando {coin}: te aviso cuando {'suba a' if msg == 'arriba' else 'baje a'} ${_p(nivel)} (ahora ${_p(precio)}).")
+        else:
+            bot.send_message(chat, f"⚠️ {msg}")
+        return
+    lista = avisos.config()['vigilancias']
+    if not lista:
+        bot.send_message(chat, "👀 No vigilas ningún nivel.\nEjemplo: /vigilar ETH 3500\nBorrar: /vigilar borrar")
+    else:
+        bot.send_message(chat, "👀 Niveles vigilados:\n" + "\n".join(
+            f"• {v['coin']} {'↑' if v['lado'] == 'arriba' else '↓'} ${_p(v['nivel'])}" for v in lista) + "\n\nBorrar: /vigilar borrar [MONEDA]")
+
+@bot.message_handler(commands=['mercado'], func=es_dueno)
+def cmd_mercado(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    c = avisos.config()
+    lineas = [f"🧭 MERCADO AHORA (avisos {'ON' if c['activo'] else 'OFF'}, {c['sensibilidad']})", ""]
+    ex = crear_instancia_exchange('swap')
+    for coin in MONEDAS_TRADING:
+        try:
+            v15, v1h, v4h, vbtc = obtener_velas_zona(coin, ex)
+            lineas.append(avisos.resumen_mercado(coin, v15[-1][4], avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc)))
+        except Exception as e:
+            lineas.append(f"• {coin}: no pude leer el mercado ({e})")
+    lineas += ["", "Un 'PUNTO DE ENTRADA' llega solo con botones; esto es para mirar cuando quieras."]
+    bot.send_message(message.chat.id, "\n".join(lineas))
 
 @bot.message_handler(commands=['aciertos'], func=es_dueno)
 def ver_aciertos(message):
@@ -1470,10 +1628,12 @@ def iniciar_hilos():
     hilo_trading.start()
     hilo_historial = threading.Thread(target=bucle_historial, daemon=True)
     hilo_historial.start()
+    threading.Thread(target=bucle_avisos_dinamicos, daemon=True).start()
 
 if __name__ == "__main__":
     print("Iniciando Bot...")
     inicializar_mercados()
+    avisos.cargar()
     enviar_aviso_inicio()
     iniciar_hilos()
     hilo_bot = threading.Thread(target=lambda: bot.infinity_polling(), daemon=True)
