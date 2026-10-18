@@ -250,3 +250,20 @@ def texto_activas(lineas):
     if n == 0:
         return "📭 Operaciones activas en MEXC Futuros: 0"
     return f"📌 Operaciones activas en MEXC Futuros: {n}\n" + "\n".join(f"• {x}" for x in lineas)
+
+
+def texto_analisis(diag):
+    """Resumen corto del mercado frente a TU posición (para /activas)."""
+    sc = diag["score"]
+    if sc >= 2:
+        t = "🔴 El mercado va en contra de tu posición. Si sigue así, considera cerrar."
+    elif sc <= -1:
+        t = "🟢 El mercado se ve a tu favor: tiene sentido mantener."
+    else:
+        t = "🟡 Señales mixtas: mantén el stop a mano y vigila."
+    extra = []
+    if diag["contra"]:
+        extra.append("En contra: " + "; ".join(diag["contra"][:3]))
+    if diag["respiro"]:
+        extra.append("A favor: " + "; ".join(diag["respiro"][:3]))
+    return t + ("\n      " + "\n      ".join(extra) if extra else "")

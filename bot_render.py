@@ -1218,7 +1218,18 @@ def types_msg(call):
         chat = call.message.chat
     return _M()
 
-def resumen_activas():
+def analisis_de_posicion(ex, p):
+    """Línea de análisis del mercado frente a una posición (None si no se pudo leer)."""
+    try:
+        lado = posiciones.lado_orden(p['lado'])
+        v15, v1h, v4h, vbtc = obtener_velas_zona(p['coin'], ex)
+        r = posiciones.rasgos_stop(lado, v15, v1h, v4h, vbtc)
+        return posiciones.texto_analisis(posiciones.diagnostico_stop(lado, r)) if r else None
+    except Exception as e:
+        print(f"No pude analizar {p.get('coin')}: {e}")
+        return None
+
+def resumen_activas(con_analisis=True):
     """(n, texto) de las operaciones abiertas en MEXC Futuros. n es None si no se pudo leer."""
     try:
         ex = crear_instancia_exchange('swap')
@@ -1227,7 +1238,9 @@ def resumen_activas():
         for p in abiertas:
             try:
                 precio = float(ex.fetch_ticker(p['market_symbol'])['last'])
-                lineas.append(posiciones.linea_activa(p, precio))
+                linea = posiciones.linea_activa(p, precio)
+                an = analisis_de_posicion(ex, p) if con_analisis else None
+                lineas.append(linea + (f"\n   🧭 {an}" if an else ""))
             except Exception as e:
                 lineas.append(f"{p['coin']} {p['lado']} (no pude leer su precio: {e})")
         return len(abiertas), posiciones.texto_activas(lineas)
@@ -1281,7 +1294,7 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
         InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE")
     )
-    n_activas, _ = resumen_activas()
+    n_activas, _ = resumen_activas(con_analisis=False)
     markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
     linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + ("no pude leerlas ahora" if n_activas is None else str(n_activas)))
     bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")

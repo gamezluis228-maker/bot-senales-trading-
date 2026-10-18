@@ -136,5 +136,9 @@ check("sin operaciones dice 0", "Futuros: 0" in P.texto_activas([]))
 ps = P.parsear_posicion({"symbol": "ZEC/USDT:USDT", "contracts": 3, "side": "short", "entryPrice": 50.0, "leverage": 20, "initialMargin": 2.0, "info": {}})
 check("short con el precio subiendo se ve en rojo", "🔴 ZEC SHORT" in P.linea_activa(ps, 51.0))
 
+check("análisis: todo en contra => sugiere considerar cerrar", "considera cerrar" in P.texto_analisis(P.diagnostico_stop("buy", contra)))
+check("análisis: respiro a favor => mantener", "mantener" in P.texto_analisis(P.diagnostico_stop("buy", resp)))
+check("análisis: mixto => vigilar", "mixtas" in P.texto_analisis(P.diagnostico_stop("buy", dict(base, tend1h="BAJISTA"))))
+
 print(f"\n{ok} OK, {fails} fallos")
 sys.exit(1 if fails else 0)
