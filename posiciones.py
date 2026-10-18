@@ -229,6 +229,6 @@ def texto_consulta(coin, pos, precio, diag, sl_duro, motivo, gestion_en_mexc=Tru
     L += ["", consejo, "(Es una estimación, no una garantía.)", "",
           f"🛑 Si pulsas Mantener, el stop de emergencia queda en ${fmt_precio(sl_duro)}"
           + (" (también puesto en MEXC)." if gestion_en_mexc else "."),
-          f"⏱️ Si no respondes en {CONSULTA_ESPERA_SEG // 60} min: "
-          + ("mantengo hasta el stop de emergencia." if rec == "MANTENER" else "cierro para protegerte.")]
+          f"⏱️ Si no respondes en {CONSULTA_ESPERA_SEG // 60} min NO cierro nada: mantengo hasta el stop de emergencia "
+          "(ese es tu límite de pérdida)."]
     return "\n".join(L)

@@ -124,7 +124,7 @@ check("rasgos_stop sin datos suficientes => None", P.rasgos_stop("buy", [], []) 
 pos_t, _ = P.crear_posicion_adoptada("buy", 100.0, 98.4, 1.5); pos_t.update(margen=1.5, apalancamiento=20)
 t = P.texto_consulta("ETH", pos_t, 98.4, P.diagnostico_stop("buy", contra), 97.8, "STOP LOSS")
 check("el mensaje de consulta dice que NO cerró, recomienda y avisa del tiempo de espera",
-      "NO he cerrado nada" in t and "Recomiendo CERRAR" in t and "3 min" in t and "97.80" in t)
+      "NO he cerrado nada" in t and "Recomiendo CERRAR" in t and "3 min" in t and "97.80" in t and "NO cierro nada" in t)
 check("con recomendación MANTENER, la espera mantiene (no cierra)", "mantengo hasta el stop de emergencia" in P.texto_consulta("ETH", pos_t, 98.4, P.diagnostico_stop("buy", resp), 97.8, "STOP LOSS"))
 
 print(f"\n{ok} OK, {fails} fallos")

@@ -815,8 +815,11 @@ def activar_stop_duro(coin, pos, auto=False):
     pos['sl_duro'] = pos['sl'] - extra if pos['lado'] == 'buy' else pos['sl'] + extra
     pos['sl_duro_activo'] = True
     pos.pop('consulta', None)
-    enviar_dueno(("🤖 Sin respuesta y con pinta de respiro: " if auto else "✋ ") + f"mantengo {coin}. "
-                 f"Cierro solo si llega a ${_p(pos['sl_duro'])} (stop de emergencia). Si el precio se recupera, vuelvo al stop normal.")
+    m = InlineKeyboardMarkup(row_width=1)
+    m.add(InlineKeyboardButton("✅ Cerrar ahora", callback_data=f"pos_clok_{coin}"))
+    enviar_dueno(("🤖 No respondiste, así que NO cierro nada: " if auto else "✋ ") + f"mantengo {coin}. "
+                 f"El único cierre automático es el stop de emergencia en ${_p(pos['sl_duro'])} (tu límite de pérdida). "
+                 "Si el precio se recupera, vuelvo al stop normal. Puedes cerrar tú cuando quieras:", m)
 
 def decidir_cierre(coin, pos, precio, motivo):
     """Cuando el precio toca el stop: CONSULTA primero. Devuelve el motivo si hay que cerrar YA, o None."""
@@ -835,10 +838,7 @@ def decidir_cierre(coin, pos, precio, motivo):
     if _pasado(pos['lado'], precio, sl_duro):
         return "STOP DE EMERGENCIA (el precio siguió en contra mientras esperaba tu respuesta)"
     if ahora - c['ts'] >= posiciones.CONSULTA_ESPERA_SEG:
-        if c['rec'] == 'MANTENER':
-            activar_stop_duro(coin, pos, auto=True)
-            return None
-        return f"{motivo} (sin respuesta en {posiciones.CONSULTA_ESPERA_SEG // 60} min: cerré para proteger tu capital)"
+        activar_stop_duro(coin, pos, auto=True)      # sin tu OK el bot NO cierra: queda el stop de emergencia
     return None
 
 def gestionar_posicion(ex, coin, pos):
