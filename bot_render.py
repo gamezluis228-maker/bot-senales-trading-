@@ -394,9 +394,9 @@ def bucle_trading_automatico():
         time.sleep(15)
 
 def teclado_entrada(coin, tipo):
-    """Un toque = orden real con ese margen (usa el callback 'mont_' de siempre)."""
+    """El monto solo PIDE confirmación ('pre_'); la orden real sale únicamente con el botón Confirmar ('mont_')."""
     m = InlineKeyboardMarkup(row_width=3)
-    m.add(*[InlineKeyboardButton(f"Operar ${x:g}", callback_data=f"mont_{coin}_{tipo}_{x}") for x in MONTOS_PERMITIDOS])
+    m.add(*[InlineKeyboardButton(f"Operar ${x:g}", callback_data=f"pre_{coin}_{tipo}_{x}") for x in MONTOS_PERMITIDOS])
     m.add(InlineKeyboardButton("📊 Ver análisis", callback_data=f"ver_{coin}"),
           InlineKeyboardButton("❌ Ignorar", callback_data=f"conf_no_{coin}_{tipo}"))
     return m
@@ -1432,7 +1432,7 @@ def callback_query(call):
             for monto in montos:
                 botones.append(InlineKeyboardButton(
                     f"${monto:.2f}",
-                    callback_data=f"mont_{coin}_{tipo}_{monto}"
+                    callback_data=f"pre_{coin}_{tipo}_{monto}"
                 ))
             m.add(*botones)
             m.add(InlineKeyboardButton("❌ Cancelar", callback_data=f"conf_no_{coin}_{tipo}"))
@@ -1444,6 +1444,26 @@ def callback_query(call):
                 f"⚡ Apalancamiento: **{APALANCAMIENTO_AUTO}x**"
             )
             bot.send_message(call.message.chat.id, rep, reply_markup=m, parse_mode="Markdown")
+
+        # === PEDIR CONFIRMACIÓN antes de abrir la orden (nada se ejecuta sin este paso) ===
+        elif accion == "pre" and len(datos) >= 4:
+            coin, tipo, monto = datos[1], datos[2], float(datos[3])
+            if monto not in MONTOS_PERMITIDOS:
+                bot.answer_callback_query(call.id, "Monto no permitido.")
+                return
+            pend = senales_pendientes.get((coin, tipo))
+            vigente = bool(pend) and (time.time() - pend['creada'] <= SENAL_VIGENCIA_SEG)
+            sl_txt = f"{pend['sl_pct']}% | TP techo {pend['tp_pct']}%" if vigente else f"{SL_PORCENTAJE}% (por defecto)"
+            m = InlineKeyboardMarkup(row_width=2)
+            m.add(InlineKeyboardButton("✅ CONFIRMAR y ejecutar", callback_data=f"mont_{coin}_{tipo}_{monto}"),
+                  InlineKeyboardButton("❌ Cancelar", callback_data=f"conf_no_{coin}_{tipo}"))
+            bot.answer_callback_query(call.id, "Confirma para ejecutar")
+            bot.send_message(call.message.chat.id,
+                             f"⚠️ CONFIRMA LA OPERACIÓN (dinero real)\n\n"
+                             f"🪙 {coin}/USDT | {'COMPRA (LONG)' if tipo == 'COMPRA' else 'VENTA (SHORT)'}\n"
+                             f"💰 Margen: ${monto:g} × {APALANCAMIENTO_AUTO}x = posición de ≈ ${monto * APALANCAMIENTO_AUTO:g}\n"
+                             f"🛡️ SL {sl_txt} | el stop sube con el precio\n\n"
+                             "Si no pulsas Confirmar, no se ejecuta nada.", reply_markup=m)
 
         # === MONTO SELECCIONADO (ejecutar con el apalancamiento automático) ===
         elif accion == "mont" and len(datos) >= 4:
@@ -1558,6 +1578,17 @@ def callback_query(call):
             zona = datos[5]
             margen = float(datos[6])
             side_manual = 'buy' if zona in ['none', 'soporte'] else 'sell'
+
+            if datos[7:8] != ['ok']:      # paso de CONFIRMACIÓN: sin pulsar Confirmar no se ejecuta nada
+                m_ok = InlineKeyboardMarkup(row_width=2)
+                m_ok.add(InlineKeyboardButton("✅ CONFIRMAR y ejecutar", callback_data=call.data + "_ok"),
+                         InlineKeyboardButton("❌ Cancelar", callback_data=f"conf_no_{coin}_{'COMPRA' if side_manual == 'buy' else 'VENTA'}"))
+                bot.answer_callback_query(call.id, "Confirma para ejecutar")
+                bot.send_message(call.message.chat.id,
+                                 f"⚠️ CONFIRMA LA OPERACIÓN (dinero real)\n\n🪙 {coin} | {'COMPRA (LONG)' if side_manual == 'buy' else 'VENTA (SHORT)'}\n"
+                                 f"📋 Orden: {tipo_orden.upper()} | {lev}x | margen ${margen:g}\n\n"
+                                 "Si no pulsas Confirmar, no se ejecuta nada.", reply_markup=m_ok)
+                return
 
             msg_espera = bot.send_message(call.message.chat.id, f"⏳ **Ejecutando orden {tipo_orden.upper()} para {coin}...**", parse_mode="Markdown")
             mercado_ccxt = 'swap' if mercado_tipo == 'fut' else 'spot'
