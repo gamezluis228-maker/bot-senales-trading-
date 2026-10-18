@@ -14,6 +14,7 @@ import posiciones
 import prediccion
 import historial
 import avisos
+import modos
 
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
@@ -695,6 +696,7 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
                 'position_id': (confirmada or {}).get('position_id'),
             })
             posiciones_gestionadas[symbol] = pos
+            modos.guardar(symbol, side, precio_entrada, 'trailing')
 
         orden['_extra'] = {'contratos': cantidad, 'nocional': nocional, 'lev_ok': lev_ok,
                            'sl_pct': sl_pct, 'tp_pct': tp_pct, 'confirmada': bool(confirmada)}
@@ -955,6 +957,7 @@ def adoptar_posicion(ex, p, modo, precio=None):
                 'ultimo_aviso_ts': time.time()})
     with _lock_pos:
         posiciones_gestionadas[p['coin']] = pos
+    modos.guardar(p['coin'], lado, p['entrada'], modo)
     return pos, (nota if modo == 'trailing' else None)
 
 def teclado_posicion(coin, pos=None, gestionada=True):
@@ -1012,9 +1015,21 @@ def detectar_posiciones_nuevas(ex):
         if posiciones_avisadas.get(coin) == clave:
             continue
         posiciones_avisadas[coin] = clave
+        recordado = modos.buscar(coin, posiciones.lado_orden(p['lado']), p['entrada'])
+        if recordado == 'ignorar':
+            continue          # ya dijiste que no quieres que la gestione
+        if recordado in ('trailing', 'vigilar'):
+            pos, nota = adoptar_posicion(ex, p, recordado)
+            enviar_dueno(f"🔁 Reinicié, pero recuerdo tu elección para {coin}: "
+                         + ("gestiono con trailing." if recordado == 'trailing' else "solo vigilo (no cierro nada por mi cuenta).")
+                         + (f"\n⚠️ {nota}" if nota else "") + "\n\n"
+                         + posiciones.texto_posicion(coin, pos, pos['ultimo_precio'], pos['margen'], pos['apalancamiento'], pos.get('liquidacion')),
+                         teclado_posicion(coin, pos, True))
+            continue
         enviar_oferta_adopcion(ex, p)
     for coin in [c for c in posiciones_avisadas if c not in vivas]:
         posiciones_avisadas.pop(coin, None)
+    modos.olvidar_cerradas(vivas)
 
 def evaluar_salida(coin, pos, ganancia_pct):
     """Lee 15m (y cada 15 min las señales de 1H) y devuelve motivos para sugerir cerrar. Nunca cierra solo."""
@@ -1112,6 +1127,12 @@ def accion_posicion(call, datos):
 
     if accion == 'pign' and len(datos) >= 2:
         bot.answer_callback_query(call.id, "Ok.")
+        try:
+            p_ign = leer_posicion(ex, f"{datos[1]}/USDT:USDT")
+            if p_ign:
+                modos.guardar(datos[1], posiciones.lado_orden(p_ign['lado']), p_ign['entrada'], 'ignorar')
+        except Exception as e:
+            print(f"No pude recordar que ignoras {datos[1]}: {e}")
         bot.send_message(chat, f"🙈 Ok, no gestiono tu posición de {datos[1]}. Usa /posiciones cuando quieras verla.")
         return
 
@@ -1202,6 +1223,7 @@ def accion_posicion(call, datos):
             pos['sl_notificado'] = nuevo['sl']
             msg = f"📈 Trailing ENCENDIDO: stop en ${_p(nuevo['sl'])} (recalculado desde el precio actual)." + (f"\n⚠️ {nota}" if nota else "")
         bot.answer_callback_query(call.id, "Listo.")
+        modos.guardar(coin, pos['lado'], pos['entrada'], pos.get('modo', 'trailing'))
         p = leer_posicion(ex, ms)
         if p:
             texto, markup = vista_posicion(ex, p)
@@ -1229,11 +1251,23 @@ def analisis_de_posicion(ex, p):
         print(f"No pude analizar {p.get('coin')}: {e}")
         return None
 
+_ultimo_error_activas = ['']
+
 def resumen_activas(con_analisis=True):
     """(n, texto) de las operaciones abiertas en MEXC Futuros. n es None si no se pudo leer."""
+    abiertas, ex, error = None, None, None
+    for intento in (1, 2):                       # MEXC a veces falla un instante: se reintenta una vez
+        try:
+            ex = crear_instancia_exchange('swap')
+            abiertas = leer_todas_las_posiciones(ex)
+            break
+        except Exception as e:
+            error = e
+            time.sleep(1.5)
+    if abiertas is None:
+        _ultimo_error_activas[0] = str(error)[:80]
+        return None, f"⚠️ No pude leer tus operaciones en MEXC ahora mismo ({error}). Intenta de nuevo en unos segundos."
     try:
-        ex = crear_instancia_exchange('swap')
-        abiertas = leer_todas_las_posiciones(ex)
         lineas = []
         for p in abiertas:
             try:
@@ -1296,7 +1330,7 @@ def mostrar_menu_principal(message):
     )
     n_activas, _ = resumen_activas(con_analisis=False)
     markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
-    linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + ("no pude leerlas ahora" if n_activas is None else str(n_activas)))
+    linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + (f"no pude leerlas ahora ({_ultimo_error_activas[0]})" if n_activas is None else str(n_activas)))
     bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
