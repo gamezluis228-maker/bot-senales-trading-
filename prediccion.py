@@ -116,30 +116,57 @@ def _f(x):
     return f"{x:,.2f}" if abs(x) >= 1 else f"{x:.6f}"
 
 
-def texto_directo(coin, pred, obj, operable):
-    """Pantalla de predicción: primero la respuesta (dirección + precios), después el análisis de siempre."""
+_ANCHO = 34
+_FUERZA = {"ALTA": "FUERTE", "MEDIA": "MEDIA", "BAJA": "DÉBIL"}
+
+
+def _caja(filas):
+    borde = "─" * _ANCHO
+    cuerpo = []
+    for fila in filas:
+        cuerpo.append("├" + borde + "┤" if fila == "-" else "│" + fila.ljust(_ANCHO)[:_ANCHO] + "│")
+    return "\n".join(["┌" + borde + "┐"] + cuerpo + ["└" + borde + "┘"])
+
+
+def cuadro_veredicto(coin, pred, obj, operable):
+    """Mensaje 1: un cuadro aparte con SOLO la respuesta (sube / baja), los precios y qué hacer. Markdown (bloque de código)."""
     p = pred["precio"]
-    pct = lambda x: f"{(x - p) / p * 100:+.2f}%"
     d = pred["direccion"]
-    cab = {"SUBE": f"{coin} SUBE ⬆️", "BAJA": f"{coin} BAJA ⬇️", "LATERAL": f"{coin} LATERAL ⏸️"}[d]
-    L = [f"🔮 {cab}  ({pred['prob_sube']}% sube | {pred['prob_baja']}% baja)",
-         f"💵 Ahora: ${_f(p)} | Confianza: {pred['confianza']}", "",
-         f"🟢 Si SUBE: ${_f(obj['sube1'])} ({pct(obj['sube1'])}) → luego ${_f(obj['sube2'])} ({pct(obj['sube2'])})",
-         f"🔴 Si BAJA: ${_f(obj['baja1'])} ({pct(obj['baja1'])}) → luego ${_f(obj['baja2'])} ({pct(obj['baja2'])})"]
+    pct = lambda x: f"{(x - p) / p * 100:+.2f}%"
+    val = lambda x: f"${_f(x)} ({pct(x)})"
+    fuerza = _FUERZA[pred["confianza"]]
     if d == "SUBE":
-        L.append(f"🛑 Se invalida si cae a ${_f(obj['invalida_sube'])}")
+        filas = [f" {coin}   ▲ SUBE   {pred['prob_sube']}%", f" Fuerza: {fuerza}", "-",
+                 f" Ahora     ${_f(p)}", f" Objetivo1 {val(obj['sube1'])}", f" Objetivo2 {val(obj['sube2'])}",
+                 f" Invalida  ${_f(obj['invalida_sube'])}"]
     elif d == "BAJA":
-        L.append(f"🛑 Se invalida si sube a ${_f(obj['invalida_baja'])}")
-    L += [f"ℹ️ {n}" for n in obj["notas"]]
-    L.append("")
+        filas = [f" {coin}   ▼ BAJA   {pred['prob_baja']}%", f" Fuerza: {fuerza}", "-",
+                 f" Ahora     ${_f(p)}", f" Objetivo1 {val(obj['baja1'])}", f" Objetivo2 {val(obj['baja2'])}",
+                 f" Invalida  ${_f(obj['invalida_baja'])}"]
+    else:
+        inc = "SUBIR" if pred["prob_sube"] >= pred["prob_baja"] else "BAJAR"
+        filas = [f" {coin}   ◆ SIN DIRECCIÓN", f" Se inclina a {inc} ({max(pred['prob_sube'], pred['prob_baja'])}%)", "-",
+                 f" Ahora     ${_f(p)}", f" Techo     {val(obj['sube1'])}", f" Piso      {val(obj['baja1'])}"]
+    L = ["```\n" + _caja(filas) + "\n```"]
     if d == "LATERAL":
-        L.append("⏸️ Sin dirección clara: no hay ventaja para entrar ahora. Espera a que defina.")
+        L.append("⏸️ Sin ventaja clara: mejor no entrar ahora. Espera a que defina.")
     else:
         accion = "COMPRA (LONG)" if d == "SUBE" else "VENTA (SHORT)"
-        L.append(f"👉 Más probable: {accion}." + (" Confianza baja: señal débil." if pred["confianza"] == "BAJA" else ""))
-        L.append("👇 Elige el monto para operar (te pediré confirmar)." if operable
+        L.append(f"👉 Plan: {accion}." + (" Señal débil: ojo." if pred["confianza"] == "BAJA" else ""))
+        L.append("👇 Elige el monto (te pediré confirmar)." if operable
                  else f"ℹ️ El bot solo opera {', '.join(OPERABLES)}; {coin} es solo informativo.")
-    L += ["", "📋 ANÁLISIS",
+    return "\n".join(L)
+
+
+def texto_directo(coin, pred, obj, operable=False):
+    """Mensaje 2: el análisis de siempre, con los dos escenarios y las notas."""
+    p = pred["precio"]
+    pct = lambda x: f"{(x - p) / p * 100:+.2f}%"
+    L = [f"📋 ANÁLISIS {coin} (5 min) | {pred['prob_sube']}% sube | {pred['prob_baja']}% baja", "",
+         f"🟢 Si SUBE: ${_f(obj['sube1'])} ({pct(obj['sube1'])}) → luego ${_f(obj['sube2'])} ({pct(obj['sube2'])})",
+         f"🔴 Si BAJA: ${_f(obj['baja1'])} ({pct(obj['baja1'])}) → luego ${_f(obj['baja2'])} ({pct(obj['baja2'])})"]
+    L += [f"ℹ️ {n}" for n in obj["notas"]]
+    L += ["",
           f"RSI (5m): {pred['rsi']} | ADX (5m): {pred['adx']}",
           f"SMA5: ${_f(pred['sma5'])} | SMA10: ${_f(pred['sma10'])}",
           f"Volumen: {pred['volumen']:.0f} (prom: {pred['volumen_promedio']:.0f})",
