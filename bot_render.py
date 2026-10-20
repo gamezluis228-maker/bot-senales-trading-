@@ -1561,15 +1561,13 @@ def callback_query(call):
                 obj = prediccion.objetivos(pred['precio'], pred['atr_pct'], pred.get('res15'), pred.get('sop15'))
                 operable = coin in MONEDAS_TRADING and pred['direccion'] in ('SUBE', 'BAJA')
                 cuadro = prediccion.cuadro_veredicto(coin, pred, obj, operable)
-                detalle = prediccion.texto_directo(coin, pred, obj)
                 markup = None
                 if operable:
                     tipo = 'COMPRA' if pred['direccion'] == 'SUBE' else 'VENTA'
                     senales_pendientes[(coin, tipo)] = {'tipo': tipo, 'precio': pred['precio'], 'sl_pct': SL_PORCENTAJE,
                                                         'tp_pct': round(SL_PORCENTAJE * senales.TP_MULTIPLO_R, 2), 'creada': time.time()}
                     markup = teclado_entrada(coin, tipo)
-                bot.send_message(call.message.chat.id, cuadro, reply_markup=markup, parse_mode="Markdown")
-                bot.send_message(call.message.chat.id, detalle)
+                bot.send_message(call.message.chat.id, cuadro, reply_markup=markup, parse_mode="Markdown")   # solo la respuesta; el análisis queda dentro del bot
             else:
                 bot.send_message(call.message.chat.id, f"❌ No se pudo analizar {coin}.", parse_mode="Markdown")
 

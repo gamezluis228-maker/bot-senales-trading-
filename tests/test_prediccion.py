@@ -55,10 +55,10 @@ pred = {"precio": 2423.45, "direccion": "SUBE", "prob_sube": 54, "prob_baja": 46
         "puntos_alcista": 5, "puntos_bajista": 2, "factores": [("Precio vs EMA9 (5m)", 1, 1.0), ("RSI", -1, 1.0)]}
 ob = P.objetivos(pred["precio"], pred["atr_pct"])
 c_ = P.cuadro_veredicto("ETH", pred, ob, True)
-check("el veredicto va en un cuadro aparte (bloque de código)", c_.startswith("```") and "┌" in c_ and "└" in c_)
+check("el veredicto va en un cuadro aparte (bloque de código)", c_.startswith("```") and "┌" not in c_ and "│" not in c_)
 check("el cuadro dice SUBE con su probabilidad y la fuerza", "ETH   ▲ SUBE   54%" in c_ and "Fuerza: DÉBIL" in c_)
 check("el cuadro trae precio, dos objetivos e invalidación", "Ahora     $2,423.45" in c_ and "Objetivo1 $2,427.09 (+0.15%)" in c_ and "Objetivo2 $2,430.72 (+0.30%)" in c_ and "Invalida  $2,419.81" in c_)
-check("todas las filas del cuadro miden lo mismo", len({len(x) for x in c_.split("```")[1].strip().splitlines()}) == 1)
+check("las líneas del cuadro son cortas (caben en el móvil)", max(len(x) for x in c_.split("```")[1].strip().splitlines()) <= 32)
 check("fuera del cuadro: plan y pedir monto", "Plan: COMPRA (LONG)" in c_ and "Elige el monto" in c_ and "Señal débil" in c_)
 cb = P.cuadro_veredicto("ETH", dict(pred, direccion="BAJA", prob_baja=61, confianza="ALTA"), ob, True)
 check("BAJA: cuadro con ▼, objetivos a la baja e invalidación al alza", "▼ BAJA   61%" in cb and "Fuerza: FUERTE" in cb and "Objetivo1 $2,419.81 (-0.15%)" in cb and "Invalida  $2,427.09" in cb and "VENTA (SHORT)" in cb)

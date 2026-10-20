@@ -121,11 +121,8 @@ _FUERZA = {"ALTA": "FUERTE", "MEDIA": "MEDIA", "BAJA": "DÉBIL"}
 
 
 def _caja(filas):
-    borde = "─" * _ANCHO
-    cuerpo = []
-    for fila in filas:
-        cuerpo.append("├" + borde + "┤" if fila == "-" else "│" + fila.ljust(_ANCHO)[:_ANCHO] + "│")
-    return "\n".join(["┌" + borde + "┐"] + cuerpo + ["└" + borde + "┘"])
+    """Cuadro sin bordes dibujados (en el móvil se rompían): líneas cortas en un bloque de código."""
+    return "\n".join("" if f == "-" else f.strip() for f in filas)
 
 
 def cuadro_veredicto(coin, pred, obj, operable):
