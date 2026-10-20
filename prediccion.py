@@ -91,3 +91,63 @@ def estimar(v5, v15=None, v1h=None):
         "vol_rel": vol_rel, "volumen": float(v[-1]), "volumen_promedio": vprom,
         "lateral": adx5 < ADX_TENDENCIA,
     }
+
+
+# --- Respuesta directa: objetivos de precio ------------------------------------------------------------------
+def objetivos(precio, atr_pct, resistencia=None, soporte=None):
+    """Precios aproximados a los que podría llegar en ~5-15 min, según el movimiento típico (ATR 5m).
+    obj1 = 1 ATR, obj2 = 2 ATR. Si hay una resistencia/soporte (15m) más cerca que obj1, el objetivo se frena
+    ahí y se avisa. Es una estimación de rango, no una garantía."""
+    atr = precio * atr_pct / 100.0
+    sube1, sube2 = precio + atr, precio + 2 * atr
+    baja1, baja2 = precio - atr, precio - 2 * atr
+    notas = []
+    if resistencia and precio < resistencia < sube1:
+        sube1 = resistencia
+        notas.append(f"Resistencia 15m cerca (${resistencia:,.2f}): puede frenar la subida.")
+    if soporte and baja1 < soporte < precio:
+        baja1 = soporte
+        notas.append(f"Soporte 15m cerca (${soporte:,.2f}): puede frenar la caída.")
+    return {"sube1": sube1, "sube2": sube2, "baja1": baja1, "baja2": baja2,
+            "invalida_sube": precio - atr, "invalida_baja": precio + atr, "notas": notas}
+
+
+def _f(x):
+    return f"{x:,.2f}" if abs(x) >= 1 else f"{x:.6f}"
+
+
+def texto_directo(coin, pred, obj, operable):
+    """Pantalla de predicción: primero la respuesta (dirección + precios), después el análisis de siempre."""
+    p = pred["precio"]
+    pct = lambda x: f"{(x - p) / p * 100:+.2f}%"
+    d = pred["direccion"]
+    cab = {"SUBE": f"{coin} SUBE ⬆️", "BAJA": f"{coin} BAJA ⬇️", "LATERAL": f"{coin} LATERAL ⏸️"}[d]
+    L = [f"🔮 {cab}  ({pred['prob_sube']}% sube | {pred['prob_baja']}% baja)",
+         f"💵 Ahora: ${_f(p)} | Confianza: {pred['confianza']}", "",
+         f"🟢 Si SUBE: ${_f(obj['sube1'])} ({pct(obj['sube1'])}) → luego ${_f(obj['sube2'])} ({pct(obj['sube2'])})",
+         f"🔴 Si BAJA: ${_f(obj['baja1'])} ({pct(obj['baja1'])}) → luego ${_f(obj['baja2'])} ({pct(obj['baja2'])})"]
+    if d == "SUBE":
+        L.append(f"🛑 Se invalida si cae a ${_f(obj['invalida_sube'])}")
+    elif d == "BAJA":
+        L.append(f"🛑 Se invalida si sube a ${_f(obj['invalida_baja'])}")
+    L += [f"ℹ️ {n}" for n in obj["notas"]]
+    L.append("")
+    if d == "LATERAL":
+        L.append("⏸️ Sin dirección clara: no hay ventaja para entrar ahora. Espera a que defina.")
+    else:
+        accion = "COMPRA (LONG)" if d == "SUBE" else "VENTA (SHORT)"
+        L.append(f"👉 Más probable: {accion}." + (" Confianza baja: señal débil." if pred["confianza"] == "BAJA" else ""))
+        L.append("👇 Elige el monto para operar (te pediré confirmar)." if operable
+                 else f"ℹ️ El bot solo opera {', '.join(OPERABLES)}; {coin} es solo informativo.")
+    L += ["", "📋 ANÁLISIS",
+          f"RSI (5m): {pred['rsi']} | ADX (5m): {pred['adx']}",
+          f"SMA5: ${_f(pred['sma5'])} | SMA10: ${_f(pred['sma10'])}",
+          f"Volumen: {pred['volumen']:.0f} (prom: {pred['volumen_promedio']:.0f})",
+          f"Movimiento típico (ATR 5m): ±{pred['atr_pct']:.2f}%",
+          f"Puntos alcistas: {pred['puntos_alcista']} | bajistas: {pred['puntos_bajista']}"]
+    L += [f"{'🟢' if v > 0 else ('🔴' if v < 0 else '⚪')} {n}" for n, v, _ in pred["factores"]]
+    L += ["", "⚠️ Probabilidad estimada con indicadores, no una certeza. Los precios son un rango aproximado."]
+    return "\n".join(L)
+
+
+OPERABLES = ("ETH", "ZEC")

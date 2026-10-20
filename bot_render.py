@@ -78,7 +78,7 @@ senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evi
 
 MONEDAS_TRADING = ["ETH", "ZEC"]
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
-MONEDAS_PREDICCION = ["BTC", "ETH", "SOL"]
+MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
 
 def es_dueno(obj):
@@ -493,7 +493,17 @@ def analizar_prediccion_5m(symbol):
                      "LATERAL": ("LATERAL / SIN DIRECCIÓN CLARA 😐", "🟡")}
         texto, emoji = etiquetas[est['direccion']]
         closes = [x[4] for x in crudas5]
+        res15 = sop15 = None
+        try:
+            c15 = senales.solo_cerradas(crudas15, 900000, ahora)
+            if len(c15) >= 30:
+                a15 = np.asarray(c15, dtype=float)
+                atr15 = indicadores.atr(a15[:, 2], a15[:, 3], a15[:, 4], 14)
+                res15, sop15, _, _ = indicadores.niveles(a15[:, 2], a15[:, 3], atr15, 24, 0.25)
+        except Exception as e:
+            print(f"No pude calcular niveles 15m de {symbol}: {e}")
         return {
+            'res15': res15, 'sop15': sop15,
             'symbol': symbol,
             'precio': closes[-1],
             'prediccion': texto,
@@ -1548,28 +1558,16 @@ def callback_query(call):
             
             if pred:
                 registrar_prediccion_historial(coin, pred)
-                rep = (
-                    f"🔮 **PREDICCIÓN 5 MINUTOS** 🔮\n\n"
-                    f"🪙 **Activo:** {coin}/USDT\n"
-                    f"💵 **Precio Actual:** ${pred['precio']}\n\n"
-                    f"{pred['emoji']} **PREDICCIÓN:** {pred['prediccion']}\n"
-                    f"📊 **Probabilidad:** ⬆️ {pred['prob_sube']}% sube | ⬇️ {pred['prob_baja']}% baja\n"
-                    f"🎚️ **Confianza:** {pred['confianza']}"
-                    f"{' (mercado lateral: ADX bajo)' if pred['lateral'] else ''}\n\n"
-                    f"📊 **RSI (5m):** {pred['rsi']}\n"
-                    f"📊 **ADX (5m):** {pred['adx']}\n"
-                    f"📈 **SMA5:** ${pred['sma5']}\n"
-                    f"📉 **SMA10:** ${pred['sma10']}\n"
-                    f"📊 **Volumen:** {pred['volumen']:.0f} (prom: {pred['volumen_promedio']:.0f})\n"
-                    f"📏 **Movimiento típico (ATR 5m):** ±{pred['atr_pct']:.2f}%\n\n"
-                    f"🎯 **Puntos Alcistas:** {pred['puntos_alcista']}\n"
-                    f"🎯 **Puntos Bajistas:** {pred['puntos_bajista']}\n\n"
-                    f"🧮 **Factores:**\n"
-                    + "\n".join(f"{'🟢' if voto > 0 else ('🔴' if voto < 0 else '⚪')} {nombre}" for nombre, voto, _ in pred['factores'])
-                    + "\n\n"
-                    f"⚠️ *Es una probabilidad estimada con indicadores, no una certeza. El bot no ejecuta órdenes aquí.*"
-                )
-                bot.send_message(call.message.chat.id, rep, parse_mode="Markdown")
+                obj = prediccion.objetivos(pred['precio'], pred['atr_pct'], pred.get('res15'), pred.get('sop15'))
+                operable = coin in MONEDAS_TRADING and pred['direccion'] in ('SUBE', 'BAJA')
+                rep = prediccion.texto_directo(coin, pred, obj, operable)
+                markup = None
+                if operable:
+                    tipo = 'COMPRA' if pred['direccion'] == 'SUBE' else 'VENTA'
+                    senales_pendientes[(coin, tipo)] = {'tipo': tipo, 'precio': pred['precio'], 'sl_pct': SL_PORCENTAJE,
+                                                        'tp_pct': round(SL_PORCENTAJE * senales.TP_MULTIPLO_R, 2), 'creada': time.time()}
+                    markup = teclado_entrada(coin, tipo)
+                bot.send_message(call.message.chat.id, rep, reply_markup=markup)
             else:
                 bot.send_message(call.message.chat.id, f"❌ No se pudo analizar {coin}.", parse_mode="Markdown")
 
