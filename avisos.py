@@ -251,3 +251,93 @@ def resumen_mercado(simbolo, precio, senales_zona):
     if falta:
         txt += "\n   Falta: " + "; ".join(falta[:3])
     return txt
+
+
+# --- Movimiento fuerte (el mercado se mueve YA) ----------------------------------------------------------------
+MOV_ATR_NORMAL = 1.5         # movimiento mínimo en 3 h, en múltiplos del rango normal (ATR 1H)
+MOV_ATR_ESTRICTA = 2.0       # por debajo de esto la señal nunca pasa de PROBABLE
+
+
+def evaluar_movimiento(simbolo, v15, v1h, v4h=None, vbtc=None):
+    """Detecta una caída o subida FUERTE en curso, aunque las EMAs lentas (1H/4H) todavía no hayan girado.
+    Es el caso que el filtro de retroceso no ve: el mercado se desploma o se dispara sin dar un rebote a la EMA 21.
+    Entras A FAVOR del movimiento ya en marcha (riesgo de rebote: por eso el stop es corto).
+    Devuelve una lista (0 o 1 señal) con el mismo formato que senales.evaluar."""
+    if len(v15) < MIN_VELAS_15M or len(v1h) < 60:
+        return []
+    c1 = np.asarray([x[4] for x in v1h], dtype=float)
+    h1 = np.asarray([x[2] for x in v1h], dtype=float)
+    l1 = np.asarray([x[3] for x in v1h], dtype=float)
+    vol1 = np.asarray([x[5] for x in v1h], dtype=float)
+    atr1 = ind.atr(h1, l1, c1, 14)
+    if atr1 <= 0:
+        return []
+    mov = float(c1[-1] - c1[-4])                       # últimas 3 velas de 1H cerradas
+    fuerza = abs(mov) / atr1
+    if fuerza < MOV_ATR_NORMAL:
+        return []
+    baja = mov < 0
+    a = np.asarray(v15, dtype=float)
+    o, h, l, c = a[:, 1], a[:, 2], a[:, 3], a[:, 4]
+    atr15 = ind.atr(h, l, c, 14)
+    if atr15 <= 0:
+        return []
+    ema9, ema21 = ind.ultima_ema(c, 9), ind.ultima_ema(c, 21)
+    sigue = bool(c[-1] < ema9 < ema21) if baja else bool(c[-1] > ema9 > ema21)
+    cuerpo_ult = float(c[-1] - o[-1])
+    rebote = (cuerpo_ult > 0.8 * atr15) if baja else (cuerpo_ult < -0.8 * atr15)   # vela fuerte en contra del movimiento
+    prom = float(vol1[-23:-3].mean()) if len(vol1) >= 23 else 0.0
+    vol_rel = float(vol1[-3:].mean() / prom) if prom > 0 else 1.0
+    e20 = ind.ultima_ema(c1, 20)
+    perdio_ema20 = bool(c1[-1] < e20) if baja else bool(c1[-1] > e20)
+    tend_btc = senales.tendencia([x[4] for x in vbtc]) if (vbtc and simbolo != "BTC") else None
+    btc_ok = tend_btc != ("ALCISTA" if baja else "BAJISTA")
+    pct = mov / float(c1[-4]) * 100
+    ax = ind.adx_serie(h1, l1, c1, 14)
+    adx = float(ax["adx"][-1]) if ax is not None else 0.0
+    verbo = "cayendo" if baja else "subiendo"
+    items = [
+        (fuerza >= MOV_ATR_ESTRICTA, f"Movimiento fuerte: {pct:+.1f}% en 3 h ({fuerza:.1f}x el rango normal)"),
+        (sigue, "EMAs 9/21 (15m) alineadas con el movimiento"),
+        (vol_rel >= 1.2, f"Volumen elevado (x{vol_rel:.1f})"),
+        (not rebote, "Sin rebote fuerte en curso"),
+        (perdio_ema20, "Precio " + ("bajo" if baja else "sobre") + " la EMA 20 (1H)"),
+        (btc_ok, "BTC no se opone" if tend_btc is not None else "BTC (sin dato)"),
+    ]
+    puntos = sum(1 for ok, _ in items if ok)
+    veredicto = senales._veredicto(puntos, len(items))
+    if fuerza < MOV_ATR_ESTRICTA and veredicto == "VERDADERO":
+        veredicto = "PROBABLE"
+    if not sigue:
+        veredicto = "DEBIL"                              # sin continuidad en 15m, no entrar
+    precio = float(c[-1])
+    direccion = "SHORT" if baja else "LONG"
+    ref_sl = float(np.max(h[-6:])) if baja else float(np.min(l[-6:]))
+    sl_pct, tp_pct = senales.plan_riesgo(direccion, precio, ref_sl, 0.1 * atr15)
+    tipo = "VENTA" if baja else "COMPRA"
+    titulos = {"VERDADERO": f"Mercado {verbo.upper()} fuerte: oportunidad de {tipo}",
+               "PROBABLE": f"Mercado {verbo} con fuerza: posible {tipo}",
+               "DEBIL": f"Movimiento sin continuidad: no entrar"}
+    return [{
+        "tipo": tipo, "direccion": direccion, "emoji": "🔴" if baja else "🟢",
+        "subtipo": "movimiento", "tf": "15m",
+        "descripcion": ("Entras a favor de un movimiento que ya está en marcha: no esperes un retroceso. "
+                        "Si rebota, el stop es corto."),
+        "titulo": titulos[veredicto], "veredicto": veredicto,
+        "puntos": puntos, "total": len(items),
+        "checklist": [(bool(ok), txt) for ok, txt in items],
+        "nivel": float(ema21), "precio": precio, "ts": int(a[-1, 0]), "atr": float(atr15),
+        "sl_pct": sl_pct, "tp_pct": tp_pct,
+        "rsi": round(float(ind.rsi(c, 14)), 1), "adx": round(adx, 1),
+        "ema20": e20, "ema50": ind.ultima_ema(c1, 50), "ema200": ind.ultima_ema(c1, 200),
+        "tendencia_1h": senales.tendencia(c1), "tendencia_4h": senales.tendencia([x[4] for x in v4h]) if v4h else "NEUTRAL",
+        "tendencia_btc": tend_btc, "simbolo": simbolo,
+    }]
+
+
+def resumen_movimiento(simbolo, senales_mov):
+    """Línea para /mercado si hay un movimiento fuerte en curso (None si no)."""
+    if not senales_mov or senales_mov[0]["veredicto"] == "DEBIL":
+        return None
+    s = senales_mov[0]
+    return f"🔥 {simbolo}: {s['titulo']} ({s['puntos']}/{s['total']})"

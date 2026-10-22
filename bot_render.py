@@ -424,31 +424,57 @@ def obtener_velas_zona(coin, ex=None):
             print(f"No pude leer BTC como contexto: {e}")
     return v15, v1h, v4h, vbtc
 
+def _posicion_real(ex, coin):
+    """Lado ('buy'/'sell') de la posición abierta en MEXC de esa moneda (la abra quien la abra), o None."""
+    try:
+        p = leer_posicion(ex, f"{coin}/USDT:USDT")
+        return posiciones.lado_orden(p['lado']) if p else None
+    except Exception as e:
+        print(f"No pude leer la posición de {coin}: {e}")
+        return None
+
 def revisar_zonas(ex):
-    """Busca puntos de entrada (retroceso a la EMA 21 con rebote) en ETH y ZEC y avisa con botones."""
+    """Busca oportunidades en ETH y ZEC: (1) punto de entrada por retroceso a la EMA 21 y (2) movimiento fuerte
+    en curso (caída o subida que las EMAs lentas aún no ven). Avisa con botones; si ya tienes posición de esa
+    moneda en el mismo sentido calla, y si es en sentido contrario te lo dice y te ofrece cerrarla."""
     cfg = avisos.config()
     if not cfg['activo']:
         return
     for coin in MONEDAS_TRADING:
         try:
-            if coin in posiciones_gestionadas:
-                continue
             v15, v1h, v4h, vbtc = obtener_velas_zona(coin, ex)
-            for s in avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc):
-                clave = (coin, s['tipo'])
+            candidatas = avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc) + avisos.evaluar_movimiento(coin, v15, v1h, v4h, vbtc)
+            lado_real = None
+            leida = False
+            for s in candidatas:
+                clave = (coin, s['tipo'], s['subtipo'])
                 ahora = time.time()
                 if not avisos.pasa_filtro(s['veredicto'], 'normal') or not avisos.puede_repetir(ultima_zona.get(clave), ahora):
                     continue
+                if not leida:
+                    lado_real, leida = _posicion_real(ex, coin), True
+                lado_senal = 'buy' if s['tipo'] == 'COMPRA' else 'sell'
+                if lado_real == lado_senal:
+                    continue                      # ya estás dentro en ese sentido
                 ultima_zona[clave] = ahora
                 registrar_senal_historial(coin, s)
                 if not avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
                     continue
-                senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
-                texto = "📍 PUNTO DE ENTRADA 📍\n\n" + construir_mensaje_senal(coin, s, obtener_sentimiento_mercado())
-                enviar_dueno(texto, teclado_entrada(coin, s['tipo']))
+                texto = "📍 PUNTO DE ENTRADA 📍\n\n" if s['subtipo'] == 'zona' else "🔥 MOVIMIENTO FUERTE 🔥\n\n"
+                texto += construir_mensaje_senal(coin, s, obtener_sentimiento_mercado(), hay_posicion=bool(lado_real))
+                if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar
+                    m = InlineKeyboardMarkup(row_width=2)
+                    m.add(InlineKeyboardButton(f"❌ Cerrar mi {coin}", callback_data=f"pos_cl_{coin}"),
+                          InlineKeyboardButton("✋ Ignorar", callback_data=f"pos_clno_{coin}"))
+                    texto += (f"\n\n⚠️ Tienes una posición de {coin} {'LONG' if lado_real == 'buy' else 'SHORT'} y esta señal va EN CONTRA. "
+                              "No abro otra encima: ¿quieres cerrar la tuya?")
+                    enviar_dueno(texto, m)
+                else:
+                    senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
+                    enviar_dueno(texto, teclado_entrada(coin, s['tipo']))
                 avisos_hoy['n'] += 1
         except Exception as e:
-            print(f"Error buscando zona de entrada en {coin}: {e}")
+            print(f"Error buscando oportunidades en {coin}: {e}")
 
 def revisar_vigilancias_bot(ex):
     cfg = avisos.config()
@@ -1526,6 +1552,9 @@ def cmd_mercado(message):
         try:
             v15, v1h, v4h, vbtc = obtener_velas_zona(coin, ex)
             lineas.append(avisos.resumen_mercado(coin, v15[-1][4], avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc)))
+            mov = avisos.resumen_movimiento(coin, avisos.evaluar_movimiento(coin, v15, v1h, v4h, vbtc))
+            if mov:
+                lineas.append("   " + mov)
         except Exception as e:
             lineas.append(f"• {coin}: no pude leer el mercado ({e})")
     lineas += ["", "Un 'PUNTO DE ENTRADA' llega solo con botones; esto es para mirar cuando quieras."]

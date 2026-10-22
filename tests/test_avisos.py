@@ -115,5 +115,52 @@ A.reiniciar_config()
 A.cargar(tmp)
 check("archivo dañado: se usan los valores por defecto", A.config()["sensibilidad"] == "estricta")
 
+
+def velas_vol(cierres, tf_ms, seed=3, ruido=0.002, alto=6):
+    r = np.random.default_rng(seed)
+    out, prev = [], cierres[0]
+    for i, c in enumerate(cierres):
+        o = prev
+        h = max(o, c) * (1 + abs(r.normal(0, ruido)))
+        l = min(o, c) * (1 - abs(r.normal(0, ruido)))
+        out.append([i * tf_ms, o, h, l, c, 100.0 * (2.5 if i >= len(cierres) - alto else 1)])
+        prev = c
+    return out
+
+
+def escenario_mov(sig, paso=0.0105):
+    """sig=-1: caída fuerte tras una subida lenta (las EMAs 1H/4H aún no giran). sig=+1: subida fuerte."""
+    base = list(2500 * (1 + 0.0008 * (-sig)) ** np.arange(294))
+    c1 = base + [base[-1] * (1 + sig * paso * k) for k in range(1, 7)]
+    c15 = list(np.linspace(c1[-7], c1[-1], 60))
+    c15 += [c15[-1] * (1 + sig * 0.0015 * k) for k in range(1, 5)]
+    return (velas_vol(c15, 900000, 5, 0.0006), velas_vol(c1, 3600000), velas(list(2500 * (1.003) ** np.arange(120)), 14400000))
+
+
+# --- movimiento fuerte ---------------------------------------------------------------------------------------
+import senales  # noqa: E402
+v15, v1, v4 = escenario_mov(-1)
+check("caso real: en una caída fuerte la tendencia 1H aún dice NEUTRAL (por eso fallaba el aviso)", senales.tendencia([x[4] for x in v1]) == "NEUTRAL")
+check("...y el filtro de retroceso no ve nada", A.evaluar_zona("ETH", v15, v1, v4, None) == [])
+r = A.evaluar_movimiento("ETH", v15, v1, v4, None)
+check("caída fuerte => oportunidad de VENTA verdadera", len(r) == 1 and r[0]["tipo"] == "VENTA" and r[0]["veredicto"] == "VERDADERO")
+s = r[0]
+check("trae stop corto, TP, checklist y campos del mensaje", 0.6 <= s["sl_pct"] <= 2.0 and s["tp_pct"] > s["sl_pct"] and s["subtipo"] == "movimiento"
+      and all(k in s for k in ("emoji", "titulo", "descripcion", "precio", "nivel", "puntos", "ema20", "ema50", "ema200", "rsi", "adx", "tendencia_4h", "ts")))
+check("el título habla de mercado cayendo", "CAYENDO" in s["titulo"] and "VENTA" in s["titulo"])
+v15u, v1u, v4u = escenario_mov(1)
+ru = A.evaluar_movimiento("ETH", v15u, v1u, v4u, None)
+check("subida fuerte => oportunidad de COMPRA", len(ru) == 1 and ru[0]["tipo"] == "COMPRA" and ru[0]["veredicto"] == "VERDADERO")
+v15s, v1s, v4s = escenario_mov(-1, paso=0.0006)
+check("movimiento pequeño (<1.5x el rango normal) => nada", A.evaluar_movimiento("ETH", v15s, v1s, v4s, None) == [])
+btc_sube = velas(list(60000 * (1.001) ** np.arange(120)), 3600000)
+rb = A.evaluar_movimiento("ETH", v15, v1, v4, btc_sube)
+check("BTC subiendo en contra de la caída baja la puntuación", rb and rb[0]["puntos"] < s["puntos"])
+v15r = [list(x) for x in v15]; v15r[-1] = [v15r[-1][0], v15r[-1][1], v15r[-1][1] * 1.02, v15r[-1][3], v15r[-1][1] * 1.015, 100.0]
+rr = A.evaluar_movimiento("ETH", v15r, v1, v4, None)
+check("si ya hay un rebote fuerte, no es VERDADERO", rr and rr[0]["veredicto"] != "VERDADERO")
+check("datos insuficientes => []", A.evaluar_movimiento("ETH", [], [], None, None) == [])
+check("/mercado muestra el movimiento fuerte", "🔥 ETH" in A.resumen_movimiento("ETH", r) and A.resumen_movimiento("ETH", []) is None)
+
 print(f"\n{ok} OK, {fails} fallos")
 sys.exit(1 if fails else 0)
