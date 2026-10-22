@@ -62,7 +62,7 @@ check("las líneas del cuadro son cortas (caben en el móvil)", max(len(x) for x
 check("fuera del cuadro: plan y pedir monto", "Plan: COMPRA (LONG)" in c_ and "Elige el monto" in c_ and "Señal débil" in c_)
 cb = P.cuadro_veredicto("ETH", dict(pred, direccion="BAJA", prob_baja=61, confianza="ALTA"), ob, True)
 check("BAJA: cuadro con ▼, objetivos a la baja e invalidación al alza", "▼ BAJA   61%" in cb and "Fuerza: FUERTE" in cb and "Objetivo1 $2,419.81 (-0.15%)" in cb and "Invalida  $2,427.09" in cb and "VENTA (SHORT)" in cb)
-check("no operable (BTC) lo aclara", "solo opera ETH, ZEC" in P.cuadro_veredicto("BTC", pred, ob, False))
+check("moneda no operable (SOL) lo aclara", "solo opera BTC, ETH, ZEC" in P.cuadro_veredicto("SOL", pred, ob, False))
 cl = P.cuadro_veredicto("ETH", dict(pred, direccion="LATERAL"), ob, True)
 check("lateral: sin dirección, se inclina a un lado, techo y piso, sin ofrecer operar", "SIN DIRECCIÓN" in cl and "Se inclina a SUBIR" in cl and "Techo" in cl and "Piso" in cl and "Elige el monto" not in cl and "mejor no entrar" in cl)
 a_ = P.texto_directo("ETH", pred, ob)

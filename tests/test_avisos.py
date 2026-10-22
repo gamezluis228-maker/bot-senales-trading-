@@ -162,5 +162,12 @@ check("si ya hay un rebote fuerte, no es VERDADERO", rr and rr[0]["veredicto"] !
 check("datos insuficientes => []", A.evaluar_movimiento("ETH", [], [], None, None) == [])
 check("/mercado muestra el movimiento fuerte", "🔥 ETH" in A.resumen_movimiento("ETH", r) and A.resumen_movimiento("ETH", []) is None)
 
+# --- alerta corta ---------------------------------------------------------------------------------------------
+ta = A.texto_alerta("ETH", s)
+check("la alerta dice qué hacer, entrada, stop y meta", ta.startswith("🔴 VENTA ETH") and "Entrada ≈" in ta and "Stop $" in ta and "Meta $" in ta and "Fuerza: FUERTE" in ta)
+check("en una venta el stop queda por encima y la meta por debajo", float(ta.split("Stop $")[1].split(" ")[0].replace(",", "")) > s["precio"] > float(ta.split("Meta $")[1].split()[0].replace(",", "")))
+check("la alerta es corta (máx. 7 líneas)", len(ta.splitlines()) <= 7)
+check("añade la línea de BTC solo si BTC va en el mismo sentido", "👑 BTC también va a la baja" in A.texto_alerta("ETH", s, "VENTA") and "👑" not in A.texto_alerta("ETH", s, "COMPRA") and "👑" not in A.texto_alerta("BTC", s, "VENTA"))
+
 print(f"\n{ok} OK, {fails} fallos")
 sys.exit(1 if fails else 0)

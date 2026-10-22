@@ -174,4 +174,4 @@ def texto_directo(coin, pred, obj, operable=False):
     return "\n".join(L)
 
 
-OPERABLES = ("ETH", "ZEC")
+OPERABLES = ("BTC", "ETH", "ZEC")

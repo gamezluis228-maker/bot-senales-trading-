@@ -341,3 +341,26 @@ def resumen_movimiento(simbolo, senales_mov):
         return None
     s = senales_mov[0]
     return f"🔥 {simbolo}: {s['titulo']} ({s['puntos']}/{s['total']})"
+
+
+# --- Alerta corta y directa ------------------------------------------------------------------------------------------
+_FUERZA_AL = {"VERDADERO": "FUERTE", "PROBABLE": "MEDIA", "DEBIL": "DÉBIL"}
+
+
+def texto_alerta(coin, s, lider_tipo=None):
+    """Alerta de entrada en pocas líneas: qué hacer, a qué precio, dónde el stop y la meta. Sin listas de indicadores."""
+    largo = s["tipo"] == "COMPRA"
+    p = s["precio"]
+    sl = p * (1 - s["sl_pct"] / 100) if largo else p * (1 + s["sl_pct"] / 100)
+    tp = p * (1 + s["tp_pct"] / 100) if largo else p * (1 - s["tp_pct"] / 100)
+    fmt = lambda x: f"{x:,.2f}" if abs(x) >= 1 else f"{x:.6f}"
+    L = [f"{'🟢 COMPRA' if largo else '🔴 VENTA'} {coin}  |  Fuerza: {_FUERZA_AL.get(s['veredicto'], 'DÉBIL')}",
+         s["titulo"],
+         f"💵 Entrada ≈ ${fmt(p)}",
+         f"🛑 Stop ${fmt(sl)} ({'-' if largo else '+'}{s['sl_pct']}%)  |  🎯 Meta ${fmt(tp)}"]
+    if lider_tipo and lider_tipo == s["tipo"] and coin != "BTC":
+        L.append(f"👑 BTC también va {'al alza' if largo else 'a la baja'}")
+    motivos = [t for ok, t in s["checklist"] if ok][:2]
+    if motivos:
+        L.append("Por qué: " + "; ".join(motivos))
+    return "\n".join(L)

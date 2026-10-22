@@ -61,7 +61,8 @@ TIPO_MARGEN_MEXC = int(os.getenv("MEXC_OPEN_TYPE", "1"))
 SL_PORCENTAJE = 1.5               # SL por defecto (operaciones manuales o sin señal vigente)
 SENAL_VIGENCIA_SEG = 5400         # una señal se puede operar con los botones durante 90 min
 SENAL_MAX_DESVIO_PCT = 0.8        # si el precio se movió más que esto desde la señal, no se opera
-INTERVALO_AVISOS_SEG = 300         # el bot busca puntos de entrada y niveles vigilados cada 5 min
+INTERVALO_AVISOS_SEG = 120         # el bot busca oportunidades y niveles vigilados cada 2 min
+lider_btc = {'tipo': None, 'ts': 0.0}   # última señal de BTC (el líder): COMPRA / VENTA
 INTERVALO_GESTION_SEG = 20        # cada cuánto el bot revisa el precio de tus posiciones
 GRACIA_POSICION_SEG = 90          # tiempo para que MEXC muestre una posición recién abierta
 INTERVALO_DETECCION_SEG = 60      # cada cuánto busca posiciones abiertas que el bot no gestiona (p. ej. las tuyas)
@@ -76,7 +77,7 @@ avisos_hoy = {'fecha': '', 'n': 0}  # contador diario de avisos de entrada (anti
 ultima_zona = {}                  # (moneda, tipo) -> hora del último aviso de zona
 senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
-MONEDAS_TRADING = ["ETH", "ZEC"]
+MONEDAS_TRADING = ["BTC", "ETH", "ZEC"]      # BTC primero: es el que lidera al resto
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
@@ -384,11 +385,16 @@ def bucle_trading_automatico():
                             if not hay_posicion:
                                 senales_pendientes[(coin, senal['tipo'])] = dict(senal, creada=time.time())
                                 markup = teclado_entrada(coin, senal['tipo'])
-                            sentimiento = obtener_sentimiento_mercado()
-                            texto = construir_mensaje_senal(coin, senal, sentimiento, hay_posicion)
+                            lider = lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None
+                            texto = "🚨 SEÑAL 1H 🚨\n\n" + avisos.texto_alerta(coin, senal, lider)
+                            if hay_posicion:
+                                texto += f"\n\nℹ️ Ya tienes una posición de {coin}: no abro otra encima."
                             if ULTIMO_CHAT_ID:
                                 bot.send_message(ULTIMO_CHAT_ID, texto, reply_markup=markup)
                             avisos_hoy['n'] += 1
+                            if coin == 'BTC':
+                                lider_btc.update(tipo=senal['tipo'], ts=time.time())
+                                _avisar_lider(crear_instancia_exchange('swap'), senal)
                 time.sleep(60)
         except Exception as e:
             print(f"Error en bucle de trading automático: {e}")
@@ -433,6 +439,22 @@ def _posicion_real(ex, coin):
         print(f"No pude leer la posición de {coin}: {e}")
         return None
 
+def _avisar_lider(ex, s):
+    """BTC manda: si BTC va con fuerza en un sentido y tienes ETH/ZEC abiertas en contra, te lo dice y ofrece cerrar."""
+    lado_btc = 'buy' if s['tipo'] == 'COMPRA' else 'sell'
+    for coin in MONEDAS_TRADING:
+        if coin == 'BTC':
+            continue
+        lado_real = _posicion_real(ex, coin)
+        clave = ('lider', coin, s['tipo'])
+        if lado_real and lado_real != lado_btc and avisos.puede_repetir(ultima_zona.get(clave), time.time()):
+            ultima_zona[clave] = time.time()
+            m = InlineKeyboardMarkup(row_width=2)
+            m.add(InlineKeyboardButton(f"❌ Cerrar mi {coin}", callback_data=f"pos_cl_{coin}"),
+                  InlineKeyboardButton("✋ Mantener", callback_data=f"pos_clno_{coin}"))
+            enviar_dueno(f"👑 BTC {'SUBE' if lado_btc == 'buy' else 'CAE'} con fuerza y tu {coin} {'LONG' if lado_real == 'buy' else 'SHORT'} va EN CONTRA.\n"
+                         "Si BTC sigue, las demás lo acompañan. ¿Cierras?", m)
+
 def revisar_zonas(ex):
     """Busca oportunidades en ETH y ZEC: (1) punto de entrada por retroceso a la EMA 21 y (2) movimiento fuerte
     en curso (caída o subida que las EMAs lentas aún no ven). Avisa con botones; si ya tienes posición de esa
@@ -461,7 +483,8 @@ def revisar_zonas(ex):
                 if not avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
                     continue
                 texto = "📍 PUNTO DE ENTRADA 📍\n\n" if s['subtipo'] == 'zona' else "🔥 MOVIMIENTO FUERTE 🔥\n\n"
-                texto += construir_mensaje_senal(coin, s, obtener_sentimiento_mercado(), hay_posicion=bool(lado_real))
+                lider = lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None
+                texto += avisos.texto_alerta(coin, s, lider)
                 if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar
                     m = InlineKeyboardMarkup(row_width=2)
                     m.add(InlineKeyboardButton(f"❌ Cerrar mi {coin}", callback_data=f"pos_cl_{coin}"),
@@ -473,6 +496,9 @@ def revisar_zonas(ex):
                     senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
                     enviar_dueno(texto, teclado_entrada(coin, s['tipo']))
                 avisos_hoy['n'] += 1
+                if coin == 'BTC' and avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']):
+                    lider_btc.update(tipo=s['tipo'], ts=time.time())
+                    _avisar_lider(ex, s)
         except Exception as e:
             print(f"Error buscando oportunidades en {coin}: {e}")
 
