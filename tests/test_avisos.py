@@ -169,5 +169,34 @@ check("en una venta el stop queda por encima y la meta por debajo", float(ta.spl
 check("la alerta es corta (máx. 7 líneas)", len(ta.splitlines()) <= 7)
 check("añade la línea de BTC solo si BTC va en el mismo sentido", "👑 BTC también va a la baja" in A.texto_alerta("ETH", s, "VENTA") and "👑" not in A.texto_alerta("ETH", s, "COMPRA") and "👑" not in A.texto_alerta("BTC", s, "VENTA"))
 
+# --- rupturas en 15m ---------------------------------------------------------------------------------------------
+def _rango_y_ruptura(sig):
+    """100 velas de 15m en rango (techo/piso tocados varias veces) y una vela final que rompe con fuerza y volumen."""
+    r = np.random.default_rng(9); v = []
+    for i in range(100):
+        mid = 100.0 + 0.4 * np.sin(i / 3.0)
+        o = mid - 0.1; c = mid + 0.1
+        v.append([i * 900000, o, min(100.5, mid + 0.35), max(99.5, mid - 0.35), c, 100.0])
+    ult = v[-1][4]
+    if sig > 0:
+        v.append([100 * 900000, 100.3, 101.7, 100.25, 101.6, 400.0])
+    else:
+        v.append([100 * 900000, 99.7, 99.75, 98.3, 98.4, 400.0])
+    return v
+
+
+for sg, tipo in ((1, "COMPRA"), (-1, "VENTA")):
+    c15 = _rango_y_ruptura(sg)
+    c1 = velas(list(100 * (1 + 0.001 * sg) ** np.arange(120)), 3600000)
+    res = A.rupturas_15m("ETH", c15, c1, None)
+    rr_ = [x for x in res if x["subtipo"].startswith("ROMPIMIENTO")]
+    check(f"ruptura en 15m ({tipo}): se detecta con la vela cerrada de 15m", rr_ and rr_[0]["tipo"] == tipo and rr_[0]["tf"] == "15m")
+    check(f"({tipo}) el título y la tendencia quedan etiquetados en 15m/1H",
+          rr_ and rr_[0]["titulo"].endswith("(15m)") and any("Tendencia 15m" in t_ for _, t_ in rr_[0]["checklist"]) and not any("Tendencia 4H" in t_ for _, t_ in rr_[0]["checklist"]))
+check("sin datos suficientes => []", A.rupturas_15m("ETH", [], [], None) == [])
+check("encabezados según el tipo de señal", A.encabezado({"subtipo": "zona"}).startswith("📍") and A.encabezado({"subtipo": "movimiento"}).startswith("🔥")
+      and "FALSO" in A.encabezado({"subtipo": "FALSO_ROMPIMIENTO_SOPORTE"}) and "RETEST" in A.encabezado({"subtipo": "RETEST_SOPORTE"})
+      and "ROMPIMIENTO" in A.encabezado({"subtipo": "ROMPIMIENTO_RESISTENCIA"}))
+
 print(f"\n{ok} OK, {fails} fallos")
 sys.exit(1 if fails else 0)

@@ -419,7 +419,7 @@ def obtener_velas_zona(coin, ex=None):
     ex = ex or crear_instancia_exchange('swap')
     ahora = int(time.time() * 1000)
     ms = f"{coin}/USDT:USDT"
-    v15 = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='15m', since=ahora - 120 * 900000, limit=120), 900000, ahora)
+    v15 = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='15m', since=ahora - 250 * 900000, limit=250), 900000, ahora)
     v1h = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='1h', since=ahora - 300 * 3600000, limit=300), 3600000, ahora)
     v4h = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='4h', since=ahora - 120 * 14400000, limit=120), 14400000, ahora)
     vbtc = None
@@ -465,7 +465,7 @@ def revisar_zonas(ex):
     for coin in MONEDAS_TRADING:
         try:
             v15, v1h, v4h, vbtc = obtener_velas_zona(coin, ex)
-            candidatas = avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc) + avisos.evaluar_movimiento(coin, v15, v1h, v4h, vbtc)
+            candidatas = avisos.evaluar_zona(coin, v15, v1h, v4h, vbtc) + avisos.evaluar_movimiento(coin, v15, v1h, v4h, vbtc) + avisos.rupturas_15m(coin, v15, v1h, vbtc)
             lado_real = None
             leida = False
             for s in candidatas:
@@ -482,7 +482,7 @@ def revisar_zonas(ex):
                 registrar_senal_historial(coin, s)
                 if not avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
                     continue
-                texto = "📍 PUNTO DE ENTRADA 📍\n\n" if s['subtipo'] == 'zona' else "🔥 MOVIMIENTO FUERTE 🔥\n\n"
+                texto = avisos.encabezado(s) + "\n\n"
                 lider = lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None
                 texto += avisos.texto_alerta(coin, s, lider)
                 if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar

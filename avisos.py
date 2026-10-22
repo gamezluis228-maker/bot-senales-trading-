@@ -364,3 +364,32 @@ def texto_alerta(coin, s, lider_tipo=None):
     if motivos:
         L.append("Por qué: " + "; ".join(motivos))
     return "\n".join(L)
+
+
+# --- Rupturas, falsos rompimientos y retests en 15m (aviso rápido) ------------------------------------------------------
+def rupturas_15m(simbolo, v15, v1h, vbtc=None):
+    """Mismas reglas de senales.evaluar (rompimiento verdadero / falso rompimiento / retest) pero sobre velas
+    cerradas de 15m, con la tendencia de 1H como contexto: avisa en minutos, sin esperar el cierre de la vela de 1H."""
+    if len(v15) < 60 or len(v1h) < 60:
+        return []
+    out = senales.evaluar(simbolo, v15, v1h, vbtc)
+    for s in out:
+        s["tf"] = "15m"
+        s["titulo"] = f"{s['titulo']} (15m)"
+        s["checklist"] = [(ok, txt.replace("Tendencia 1H EMA20/50", "Tendencia 15m EMA20/50")
+                           .replace("Tendencia 4H EMA20/50", "Tendencia 1H EMA20/50")) for ok, txt in s["checklist"]]
+    return out
+
+
+def encabezado(s):
+    """Primera línea del aviso según el tipo de señal."""
+    sub = s.get("subtipo", "")
+    if sub == "zona":
+        return "📍 PUNTO DE ENTRADA 📍"
+    if sub == "movimiento":
+        return "🔥 MOVIMIENTO FUERTE 🔥"
+    if sub.startswith("FALSO"):
+        return "⚠️ FALSO ROMPIMIENTO (15m) ⚠️"
+    if sub.startswith("RETEST"):
+        return "🔁 RETEST (15m) 🔁"
+    return "🚨 ROMPIMIENTO (15m) 🚨"
