@@ -1409,6 +1409,21 @@ def ver_saldo(message):
     if total is None and libre is None and usado is None:
         lineas.append("No pude desglosar el saldo en USDT; revisa MEXC.")
     try:
+        ex_spot = crear_instancia_exchange('spot')
+        bal_spot = ex_spot.fetch_balance()
+        usdt_spot = (bal_spot.get('USDT') or {}) if isinstance(bal_spot, dict) else {}
+        lineas.append("")
+        lineas.append("📊 SPOT")
+        if usdt_spot.get('total') is not None:
+            lineas.append(f"Total: ${usdt_spot['total']:.2f} USDT")
+        if usdt_spot.get('free') is not None:
+            lineas.append(f"Disponible: ${usdt_spot['free']:.2f} USDT")
+        if usdt_spot.get('total') is None and usdt_spot.get('free') is None:
+            lineas.append("Sin saldo USDT en spot.")
+    except Exception:
+        lineas.append("")
+        lineas.append("📊 SPOT: no pude leerlo ahora mismo.")
+    try:
         abiertas = leer_todas_las_posiciones(ex)
     except Exception:
         abiertas = []
