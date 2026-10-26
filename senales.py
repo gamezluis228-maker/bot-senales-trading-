@@ -222,10 +222,13 @@ def _trampa(m, direccion, tend4h, tend_btc):
 
 
 def _cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc):
-    """Cruce EMA 9/21 con filtro RSI y EMA200 (entrada y salida).
+    """Cruce EMA 9/21 CONFIRMADO con filtro RSI y EMA200 (entrada y salida).
 
-    LONG: EMA9 cruza sobre EMA21 en la última vela cerrada, RSI < 65 y
-    precio sobre EMA200. SHORT: lo contrario (RSI > 35, precio bajo EMA200).
+    LONG: EMA9 cruza sobre EMA21 en la penúltima vela cerrada y SE MANTIENE
+    sobre EMA21 en la última vela, RSI < 65 y precio sobre EMA200.
+    SHORT: lo contrario (RSI > 35, precio bajo EMA200).
+    La confirmación de una vela filtra los cruces microscópicos que se deshacen
+    al instante (latigazos); la señal llega una vela más tarde.
     La señal contraria sirve también como aviso de salida.
     """
     largo = direccion == "LONG"
@@ -233,21 +236,22 @@ def _cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc):
         return None
     e9 = ind.ema(cierres, 9)
     e21 = ind.ema(cierres, 21)
-    if np.isnan(e9[-1]) or np.isnan(e9[-2]) or np.isnan(e21[-1]) or np.isnan(e21[-2]):
+    if (np.isnan(e9[-1]) or np.isnan(e9[-2]) or np.isnan(e9[-3])
+            or np.isnan(e21[-1]) or np.isnan(e21[-2]) or np.isnan(e21[-3])):
         return None
     if largo:
-        cruzo = e9[-2] <= e21[-2] and e9[-1] > e21[-1]
+        cruzo = e9[-3] <= e21[-3] and e9[-2] > e21[-2] and e9[-1] > e21[-1]
         rsi_ok = m["rsi"] < 65
         tend_ok = m["c"] > m["ema200"]
-        desc = "Cruce EMA 9 sobre EMA 21 con RSI < 65 (entrada LONG)"
+        desc = "Cruce EMA 9 sobre EMA 21 confirmado con RSI < 65 (entrada LONG)"
         sub = "CRUCE_EMA_RSI_LONG"
         titulos = {"VERDADERO": "CRUCE EMA LONG ✅", "PROBABLE": "CRUCE EMA LONG ⚠️",
                    "DEBIL": "CRUCE EMA LONG DÉBIL ❌"}
     else:
-        cruzo = e9[-2] >= e21[-2] and e9[-1] < e21[-1]
+        cruzo = e9[-3] >= e21[-3] and e9[-2] < e21[-2] and e9[-1] < e21[-1]
         rsi_ok = m["rsi"] > 35
         tend_ok = m["c"] < m["ema200"]
-        desc = "Cruce EMA 9 bajo EMA 21 con RSI > 35 (entrada SHORT)"
+        desc = "Cruce EMA 9 bajo EMA 21 confirmado con RSI > 35 (entrada SHORT)"
         sub = "CRUCE_EMA_RSI_SHORT"
         titulos = {"VERDADERO": "CRUCE EMA SHORT ✅", "PROBABLE": "CRUCE EMA SHORT ⚠️",
                    "DEBIL": "CRUCE EMA SHORT DÉBIL ❌"}
@@ -256,7 +260,7 @@ def _cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc):
     if tend4h == ("BAJISTA" if largo else "ALCISTA"):
         return None
     items = [
-        (True, f"Cruce EMA 9/21 en la última vela cerrada (EMA9 {e9[-1]:.2f} vs EMA21 {e21[-1]:.2f})"),
+        (True, f"Cruce EMA 9/21 confirmado en las últimas 2 velas cerradas (EMA9 {e9[-1]:.2f} vs EMA21 {e21[-1]:.2f})"),
         (rsi_ok, f"RSI {m['rsi']:.1f} ({'< 65' if largo else '> 35'})"),
         (tend_ok, f"Precio {'sobre' if largo else 'bajo'} EMA200 ({m['ema200']:.2f})"),
         (tend4h == ("ALCISTA" if largo else "BAJISTA"), f"Tendencia 4H a favor ({tend4h})"),
