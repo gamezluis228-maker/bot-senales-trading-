@@ -253,10 +253,13 @@ def _cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc):
                    "DEBIL": "CRUCE EMA SHORT DÉBIL ❌"}
     if not cruzo:
         return None
+    if tend4h == ("BAJISTA" if largo else "ALCISTA"):
+        return None
     items = [
         (True, f"Cruce EMA 9/21 en la última vela cerrada (EMA9 {e9[-1]:.2f} vs EMA21 {e21[-1]:.2f})"),
         (rsi_ok, f"RSI {m['rsi']:.1f} ({'< 65' if largo else '> 35'})"),
         (tend_ok, f"Precio {'sobre' if largo else 'bajo'} EMA200 ({m['ema200']:.2f})"),
+        (tend4h == ("ALCISTA" if largo else "BAJISTA"), f"Tendencia 4H a favor ({tend4h})"),
     ]
     if tend_btc is not None:
         contra = "BAJISTA" if largo else "ALCISTA"
