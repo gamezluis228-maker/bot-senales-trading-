@@ -41,7 +41,7 @@ app = Flask(__name__)
 
 # ID de Telegram del ÚNICO usuario autorizado. Puede sobreescribirse en Render con la
 # variable de entorno TELEGRAM_OWNER_ID (sin necesidad de tocar el código).
-DUENO_ID = int(os.getenv("TELEGRAM_OWNER_ID", "7115547861"))
+DUENO_ID = int(os.getenv("TELEGRAM_OWNER_ID", "8886788683"))
 ULTIMO_CHAT_ID = DUENO_ID
 ultimos_timestamps = {"BTC": 0, "ETH": 0, "ZEC": 0}
 
