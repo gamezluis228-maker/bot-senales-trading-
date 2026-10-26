@@ -77,7 +77,7 @@ avisos_hoy = {'fecha': '', 'n': 0}  # contador diario de avisos de entrada (anti
 ultima_zona = {}                  # (moneda, tipo) -> hora del último aviso de zona
 senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
-MONEDAS_TRADING = ["BTC", "ETH", "ZEC"]      # BTC primero: es el que lidera al resto
+MONEDAS_TRADING = ["ETH", "ZEC"]      # Solo ETH y ZEC se operan; BTC sigue como líder/referencia, no se opera
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
@@ -455,6 +455,19 @@ def _avisar_lider(ex, s):
             enviar_dueno(f"👑 BTC {'SUBE' if lado_btc == 'buy' else 'CAE'} con fuerza y tu {coin} {'LONG' if lado_real == 'buy' else 'SHORT'} va EN CONTRA.\n"
                          "Si BTC sigue, las demás lo acompañan. ¿Cierras?", m)
 
+def revisar_lider_btc(ex):
+    """BTC ya no se opera, pero sigue mandando: si BTC se mueve con fuerza, actualiza lider_btc
+    y avisa si tus ETH/ZEC van en contra. No genera señales de entrada para BTC."""
+    try:
+        v15, v1h, v4h, vbtc = obtener_velas_zona('BTC', ex)
+        for s in avisos.evaluar_zona('BTC', v15, v1h, v4h, vbtc) + avisos.evaluar_movimiento('BTC', v15, v1h, v4h, vbtc) + avisos.rupturas_15m('BTC', v15, v1h, vbtc):
+            if avisos.pasa_filtro(s['veredicto'], 'normal'):
+                lider_btc.update(tipo=s['tipo'], ts=time.time())
+                _avisar_lider(ex, s)
+                break
+    except Exception as e:
+        print(f"Error revisando BTC como líder: {e}")
+
 def revisar_zonas(ex):
     """Busca oportunidades en ETH y ZEC: (1) punto de entrada por retroceso a la EMA 21 y (2) movimiento fuerte
     en curso (caída o subida que las EMAs lentas aún no ven). Avisa con botones; si ya tienes posición de esa
@@ -501,6 +514,7 @@ def revisar_zonas(ex):
                     _avisar_lider(ex, s)
         except Exception as e:
             print(f"Error buscando oportunidades en {coin}: {e}")
+    revisar_lider_btc(ex)
 
 def revisar_vigilancias_bot(ex):
     cfg = avisos.config()
