@@ -221,6 +221,53 @@ def _trampa(m, direccion, tend4h, tend_btc):
     return _armar(m, direccion, sub, desc, titulos, items, nivel, extremo, 0.25 * m["atr"])
 
 
+def _cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc):
+    """Cruce EMA 9/21 con filtro RSI y EMA200 (entrada y salida).
+
+    LONG: EMA9 cruza sobre EMA21 en la última vela cerrada, RSI < 65 y
+    precio sobre EMA200. SHORT: lo contrario (RSI > 35, precio bajo EMA200).
+    La señal contraria sirve también como aviso de salida.
+    """
+    largo = direccion == "LONG"
+    if len(cierres) < 201:
+        return None
+    e9 = ind.ema(cierres, 9)
+    e21 = ind.ema(cierres, 21)
+    if np.isnan(e9[-1]) or np.isnan(e9[-2]) or np.isnan(e21[-1]) or np.isnan(e21[-2]):
+        return None
+    if largo:
+        cruzo = e9[-2] <= e21[-2] and e9[-1] > e21[-1]
+        rsi_ok = m["rsi"] < 65
+        tend_ok = m["c"] > m["ema200"]
+        desc = "Cruce EMA 9 sobre EMA 21 con RSI < 65 (entrada LONG)"
+        sub = "CRUCE_EMA_RSI_LONG"
+        titulos = {"VERDADERO": "CRUCE EMA LONG ✅", "PROBABLE": "CRUCE EMA LONG ⚠️",
+                   "DEBIL": "CRUCE EMA LONG DÉBIL ❌"}
+    else:
+        cruzo = e9[-2] >= e21[-2] and e9[-1] < e21[-1]
+        rsi_ok = m["rsi"] > 35
+        tend_ok = m["c"] < m["ema200"]
+        desc = "Cruce EMA 9 bajo EMA 21 con RSI > 35 (entrada SHORT)"
+        sub = "CRUCE_EMA_RSI_SHORT"
+        titulos = {"VERDADERO": "CRUCE EMA SHORT ✅", "PROBABLE": "CRUCE EMA SHORT ⚠️",
+                   "DEBIL": "CRUCE EMA SHORT DÉBIL ❌"}
+    if not cruzo:
+        return None
+    items = [
+        (True, f"Cruce EMA 9/21 en la última vela cerrada (EMA9 {e9[-1]:.2f} vs EMA21 {e21[-1]:.2f})"),
+        (rsi_ok, f"RSI {m['rsi']:.1f} ({'< 65' if largo else '> 35'})"),
+        (tend_ok, f"Precio {'sobre' if largo else 'bajo'} EMA200 ({m['ema200']:.2f})"),
+    ]
+    if tend_btc is not None:
+        contra = "BAJISTA" if largo else "ALCISTA"
+        items.append((tend_btc != contra, f"BTC 1H no está en contra ({tend_btc})"))
+    senal = _armar(m, direccion, sub, desc, titulos, items, m["c"], m["c"], 0.5 * m["atr"])
+    senal["sl_pct"] = 1.5
+    senal["tp_pct"] = 3.0
+    senal["salida"] = "Cruce contrario, stop -1,5% o meta +3%"
+    return senal
+
+
 def _retest(velas, direccion, tend4h, tend_btc, m_actual):
     """Rompimiento reciente (hasta 6 velas atrás) + regreso al nivel que rebota.
     Es la entrada de mejor calidad: stop corto y nivel ya validado."""
@@ -298,6 +345,9 @@ def evaluar(simbolo, v1h, v4h=None, vbtc=None):
         t = _trampa(m, direccion, tend4h, tend_btc)
         if t is not None and t["veredicto"] != "DEBIL":
             señales.append(t)
+        c = _cruce_ema_rsi([x[4] for x in v1h], m, direccion, tend4h, tend_btc)
+        if c is not None:
+            señales.append(c)
     for s in señales:
         s["simbolo"] = simbolo
         s["tendencia_1h"] = m["tend1h"]
@@ -305,6 +355,7 @@ def evaluar(simbolo, v1h, v4h=None, vbtc=None):
         s["tendencia_btc"] = tend_btc
     señales.sort(key=lambda s: (_RANGO[s["veredicto"]], s["puntos"] / s["total"]), reverse=True)
     return señales
+
 
 
 # ----------------------------------------------------------------------------
@@ -333,6 +384,7 @@ def pnl_estimado(lado, entrada, salida, margen, apalancamiento):
         return 0.0, 0.0
     pct = (salida - entrada) / entrada * 100.0 if lado == "buy" else (entrada - salida) / entrada * 100.0
     return pct, margen * apalancamiento * pct / 100.0
+
 
 
 # ----------------------------------------------------------------------------
