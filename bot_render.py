@@ -1120,6 +1120,17 @@ def vigilar_movimiento(coin, pos, precio):
     """Te avisa (con botones) cada vez que la posición cambia 10 % de tu margen, y cuando hay motivos para salir."""
     ahora = time.time()
     v = posiciones.variacion(pos['lado'], pos['entrada'], precio, pos['margen'], pos['apalancamiento'])
+    # Control de ganancia/pérdida: avisa cuando la posición ENTRA en ganancia o en pérdida.
+    estado_pnl = 'ganancia' if v['pnl_usdt'] > 0 else ('perdida' if v['pnl_usdt'] < 0 else None)
+    if estado_pnl is not None:
+        if 'estado_pnl' not in pos:
+            pos['estado_pnl'] = estado_pnl  # primera lectura: marca sin avisar
+        elif pos['estado_pnl'] != estado_pnl:
+            pos['estado_pnl'] = estado_pnl
+            if estado_pnl == 'ganancia':
+                enviar_dueno(f"🟢 {coin} entró en GANANCIA (${v['pnl_usdt']:+.2f}). Precio actual: ${_p(precio)}")
+            else:
+                enviar_dueno(f"🔴 {coin} entró en PÉRDIDA (${v['pnl_usdt']:+.2f}). Precio actual: ${_p(precio)}")
     esc = posiciones.escalon_nuevo(v['pct_margen'], pos.get('ultimo_escalon', 0))
     if esc is not None and ahora - pos.get('ultimo_aviso_ts', 0) >= posiciones.MIN_SEG_ENTRE_AVISOS:
         pos['ultimo_escalon'] = esc
@@ -1374,6 +1385,52 @@ def ver_posiciones(message):
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ No pude mostrar {p['coin']}: {e}")
 
+@bot.message_handler(commands=['saldo'], func=es_dueno)
+def ver_saldo(message):
+    global ULTIMO_CHAT_ID
+    ULTIMO_CHAT_ID = message.chat.id
+    try:
+        ex = crear_instancia_exchange('swap')
+        bal = ex.fetch_balance()
+    except Exception as e:
+        bot.send_message(message.chat.id, f"⚠️ No pude leer tu saldo en MEXC ahora mismo ({e}). Intenta de nuevo en unos segundos.")
+        return
+    usdt = (bal.get('USDT') or {}) if isinstance(bal, dict) else {}
+    total = usdt.get('total')
+    libre = usdt.get('free')
+    usado = usdt.get('used')
+    lineas = ["💰 SALDO MEXC FUTUROS"]
+    if total is not None:
+        lineas.append(f"Total: ${total:.2f} USDT")
+    if libre is not None:
+        lineas.append(f"Disponible: ${libre:.2f} USDT")
+    if usado is not None:
+        lineas.append(f"En uso (margen): ${usado:.2f} USDT")
+    if total is None and libre is None and usado is None:
+        lineas.append("No pude desglosar el saldo en USDT; revisa MEXC.")
+    try:
+        abiertas = leer_todas_las_posiciones(ex)
+    except Exception:
+        abiertas = []
+    if abiertas:
+        lineas.append("")
+        lineas.append("📌 Posiciones abiertas:")
+        pnl_total = 0.0
+        for p in abiertas:
+            try:
+                precio = float(ex.fetch_ticker(p['market_symbol'])['last'])
+            except Exception:
+                precio = p['entrada']
+            margen = p['margen'] if p['margen'] > 0 else margen_de_posicion(ex, p)
+            pct, pnl = senales.pnl_estimado(p['lado'], p['entrada'], precio, margen, p['apalancamiento'])
+            pnl_total += pnl
+            lineas.append(f"{p['coin']} {'LONG 🟢' if p['lado'] == 'buy' else 'SHORT 🔴'} | PnL {pct:+.2f}% (${pnl:+.2f})")
+        lineas.append(f"PnL total no realizado: ${pnl_total:+.2f}")
+    else:
+        lineas.append("")
+        lineas.append("Sin posiciones abiertas.")
+    bot.send_message(message.chat.id, "\n".join(lineas))
+
 def enviar_aviso_inicio():
     avisar(f"🟢 Bot iniciado.\n• Operar: {', '.join(MONEDAS_TRADING)} | {APALANCAMIENTO_AUTO}x | margen {' / '.join(f'${m:g}' for m in MONTOS_PERMITIDOS)}\n"
            f"• Reportes cada 15 min: {', '.join(MONEDAS_REPORTE)}\n• Límite de pérdida diaria: ${LIMITE_PERDIDA_DIARIA:.2f}\n• Usa /posiciones para ver y manejar tus posiciones.")
@@ -1393,7 +1450,7 @@ def mostrar_menu_principal(message):
     n_activas, _ = resumen_activas(con_analisis=False)
     markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
     linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + (f"no pude leerlas ahora ({_ultimo_error_activas[0]})" if n_activas is None else str(n_activas)))
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /saldo - Tu saldo en MEXC y ganancia/pérdida abierta\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
