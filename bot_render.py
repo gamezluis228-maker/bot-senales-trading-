@@ -476,9 +476,12 @@ def bucle_trading_automatico():
         time.sleep(15)
 
 def teclado_entrada(coin, tipo):
-    """El monto solo PIDE confirmación ('pre_'); la orden real sale únicamente con el botón Confirmar ('mont_')."""
+    """El monto solo PIDE confirmación ('pre_'); la orden real sale únicamente con el botón Confirmar ('mont_').
+    BTC da señales y alertas como siempre, pero NO se opera: sus mensajes no llevan botones Operar
+    (el bloqueo de ejecución en la orden queda como segunda capa)."""
     m = InlineKeyboardMarkup(row_width=3)
-    m.add(*[InlineKeyboardButton(f"Operar ${x:g}", callback_data=f"pre_{coin}_{tipo}_{x}") for x in MONTOS_PERMITIDOS])
+    if coin in MONEDAS_OPERABLES:
+        m.add(*[InlineKeyboardButton(f"Operar ${x:g}", callback_data=f"pre_{coin}_{tipo}_{x}") for x in MONTOS_PERMITIDOS])
     m.add(InlineKeyboardButton("📊 Ver análisis", callback_data=f"ver_{coin}"),
           InlineKeyboardButton("❌ Ignorar", callback_data=f"conf_no_{coin}_{tipo}"))
     return m
