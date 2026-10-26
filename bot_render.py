@@ -77,7 +77,8 @@ avisos_hoy = {'fecha': '', 'n': 0}  # contador diario de avisos de entrada (anti
 ultima_zona = {}                  # (moneda, tipo) -> hora del último aviso de zona
 senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
-MONEDAS_TRADING = ["ETH", "ZEC"]      # Solo ETH y ZEC se operan; BTC sigue como líder/referencia, no se opera
+MONEDAS_TRADING = ["BTC", "ETH", "ZEC"]      # Señales y alertas: las tres, como siempre
+MONEDAS_OPERABLES = ["ETH", "ZEC"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
@@ -455,19 +456,6 @@ def _avisar_lider(ex, s):
             enviar_dueno(f"👑 BTC {'SUBE' if lado_btc == 'buy' else 'CAE'} con fuerza y tu {coin} {'LONG' if lado_real == 'buy' else 'SHORT'} va EN CONTRA.\n"
                          "Si BTC sigue, las demás lo acompañan. ¿Cierras?", m)
 
-def revisar_lider_btc(ex):
-    """BTC ya no se opera, pero sigue mandando: si BTC se mueve con fuerza, actualiza lider_btc
-    y avisa si tus ETH/ZEC van en contra. No genera señales de entrada para BTC."""
-    try:
-        v15, v1h, v4h, vbtc = obtener_velas_zona('BTC', ex)
-        for s in avisos.evaluar_zona('BTC', v15, v1h, v4h, vbtc) + avisos.evaluar_movimiento('BTC', v15, v1h, v4h, vbtc) + avisos.rupturas_15m('BTC', v15, v1h, vbtc):
-            if avisos.pasa_filtro(s['veredicto'], 'normal'):
-                lider_btc.update(tipo=s['tipo'], ts=time.time())
-                _avisar_lider(ex, s)
-                break
-    except Exception as e:
-        print(f"Error revisando BTC como líder: {e}")
-
 def revisar_zonas(ex):
     """Busca oportunidades en ETH y ZEC: (1) punto de entrada por retroceso a la EMA 21 y (2) movimiento fuerte
     en curso (caída o subida que las EMAs lentas aún no ven). Avisa con botones; si ya tienes posición de esa
@@ -514,7 +502,6 @@ def revisar_zonas(ex):
                     _avisar_lider(ex, s)
         except Exception as e:
             print(f"Error buscando oportunidades en {coin}: {e}")
-    revisar_lider_btc(ex)
 
 def revisar_vigilancias_bot(ex):
     cfg = avisos.config()
@@ -648,8 +635,8 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             return False, 0, 0, 0, 0, 0, 0, f"🛑 **BLOQUEO POR PÉRDIDA DIARIA:** Has alcanzado el límite de ${LIMITE_PERDIDA_DIARIA} USD."
 
         # Candados de seguridad: solo ETH/ZEC en futuros, tope de margen y una posición por moneda
-        if mercado != 'swap' or symbol not in MONEDAS_TRADING:
-            return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** solo se permite operar {', '.join(MONEDAS_TRADING)} en Futuros."
+        if mercado != 'swap' or symbol not in MONEDAS_OPERABLES:
+            return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** solo se permite operar {', '.join(MONEDAS_OPERABLES)} en Futuros."
         if margen_usdt <= 0 or margen_usdt > MARGEN_MAXIMO_USDT:
             return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** el margen máximo permitido por operación es ${MARGEN_MAXIMO_USDT}."
         if symbol in posiciones_gestionadas:
@@ -1461,7 +1448,7 @@ def ver_saldo(message):
     bot.send_message(message.chat.id, "\n".join(lineas))
 
 def enviar_aviso_inicio():
-    avisar(f"🟢 Bot iniciado.\n• Operar: {', '.join(MONEDAS_TRADING)} | {APALANCAMIENTO_AUTO}x | margen {' / '.join(f'${m:g}' for m in MONTOS_PERMITIDOS)}\n"
+    avisar(f"🟢 Bot iniciado.\n• Operar: {', '.join(MONEDAS_OPERABLES)} | {APALANCAMIENTO_AUTO}x | margen {' / '.join(f'${m:g}' for m in MONTOS_PERMITIDOS)}\n"
            f"• Reportes cada 15 min: {', '.join(MONEDAS_REPORTE)}\n• Límite de pérdida diaria: ${LIMITE_PERDIDA_DIARIA:.2f}\n• Usa /posiciones para ver y manejar tus posiciones.")
 @bot.message_handler(commands=['start', 'menu'], func=es_dueno)
 def mostrar_menu_principal(message):
@@ -1700,7 +1687,7 @@ def callback_query(call):
             if pred:
                 registrar_prediccion_historial(coin, pred)
                 obj = prediccion.objetivos(pred['precio'], pred['atr_pct'], pred.get('res15'), pred.get('sop15'))
-                operable = coin in MONEDAS_TRADING and pred['direccion'] in ('SUBE', 'BAJA')
+                operable = coin in MONEDAS_OPERABLES and pred['direccion'] in ('SUBE', 'BAJA')
                 cuadro = prediccion.cuadro_veredicto(coin, pred, obj, operable)
                 markup = None
                 if operable:
@@ -1841,7 +1828,7 @@ def callback_query(call):
         elif call.data == "menu_futuros":
             bot.answer_callback_query(call.id, "Futuros MEXC...")
             m = InlineKeyboardMarkup(row_width=2)
-            m.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in MONEDAS_TRADING])
+            m.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in MONEDAS_OPERABLES])
             bot.send_message(call.message.chat.id, "⚡ **Selecciona Activo para Futuros (MEXC):**", reply_markup=m, parse_mode="Markdown")
 
         # === SELECCIÓN DE MONEDA FUTUROS ===
