@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+from datetime import datetime, timezone, timedelta
 import requests
 import telebot
 import ccxt
@@ -79,6 +80,35 @@ senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evi
 
 MONEDAS_TRADING = ["BTC", "ETH", "ZEC"]      # Señales y alertas: las tres, como siempre
 MONEDAS_OPERABLES = ["ETH", "ZEC"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
+
+# --- Filtro de noticias: sin entradas nuevas cerca de anuncios grandes ---
+# Horas en UTC (Caracas = UTC-4). La lista se mantiene a mano: dime fecha y hora del
+# próximo anuncio y lo agrego. Solo pausa ENTRADAS nuevas; la gestión de posiciones,
+# los avisos de BTC líder y las sugerencias de salida siguen funcionando.
+VENTANA_PRE_MIN = 30
+VENTANA_POST_MIN = 60
+EVENTOS_NOTICIAS = [
+    ("Decisión de tasas Fed", datetime(2026, 10, 28, 18, 0, tzinfo=timezone.utc)),  # mié 14:00 Caracas
+    ("PIB Q3 y PCE de EE.UU.", datetime(2026, 10, 29, 12, 30, tzinfo=timezone.utc)),  # jue 08:30 Caracas
+]
+_bloqueo_notificado = [None]
+
+def bloqueo_noticias(ahora=None):
+    """(nombre, cuando) si ahora cae en la ventana de un evento, o None."""
+    ahora = ahora or datetime.now(timezone.utc)
+    for nombre, cuando in EVENTOS_NOTICIAS:
+        if cuando - timedelta(minutes=VENTANA_PRE_MIN) <= ahora <= cuando + timedelta(minutes=VENTANA_POST_MIN):
+            return nombre, cuando
+    return None
+
+def avisar_inicio_bloqueo():
+    """Avisa una sola vez por evento cuando empieza la pausa."""
+    b = bloqueo_noticias()
+    if b and _bloqueo_notificado[0] != b[1]:
+        _bloqueo_notificado[0] = b[1]
+        nombre, cuando = b
+        hasta = cuando + timedelta(minutes=VENTANA_POST_MIN) - timedelta(hours=4)
+        avisar(f"⏸️ Pausa por noticias: {nombre}.\nNo mando señales de entrada nuevas hasta las {hasta.strftime('%H:%M')} hora Caracas. Tus posiciones siguen vigiladas.")
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
@@ -383,6 +413,8 @@ def bucle_trading_automatico():
                             if not cfg['activo'] or not avisos.pasa_filtro(senal['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
                                 continue
                             markup = None
+                            if not hay_posicion and bloqueo_noticias():
+                                continue  # pausa por noticias: no se abre nada nuevo
                             if not hay_posicion:
                                 senales_pendientes[(coin, senal['tipo'])] = dict(senal, creada=time.time())
                                 markup = teclado_entrada(coin, senal['tipo'])
@@ -486,6 +518,7 @@ def revisar_zonas(ex):
                 texto = avisos.encabezado(s) + "\n\n"
                 lider = lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None
                 texto += avisos.texto_alerta(coin, s, lider)
+                pausa = bloqueo_noticias()  # en pausa por noticias no se abre nada nuevo (salidas y avisos siguen)
                 if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar
                     m = InlineKeyboardMarkup(row_width=2)
                     m.add(InlineKeyboardButton(f"❌ Cerrar mi {coin}", callback_data=f"pos_cl_{coin}"),
@@ -493,10 +526,11 @@ def revisar_zonas(ex):
                     texto += (f"\n\n⚠️ Tienes una posición de {coin} {'LONG' if lado_real == 'buy' else 'SHORT'} y esta señal va EN CONTRA. "
                               "No abro otra encima: ¿quieres cerrar la tuya?")
                     enviar_dueno(texto, m)
-                else:
+                elif not pausa:
                     senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
                     enviar_dueno(texto, teclado_entrada(coin, s['tipo']))
-                avisos_hoy['n'] += 1
+                if lado_real or not pausa:
+                    avisos_hoy['n'] += 1
                 if coin == 'BTC' and avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']):
                     lider_btc.update(tipo=s['tipo'], ts=time.time())
                     _avisar_lider(ex, s)
@@ -521,6 +555,7 @@ def bucle_avisos_dinamicos():
     while True:
         try:
             ex = crear_instancia_exchange('swap')
+            avisar_inicio_bloqueo()
             revisar_vigilancias_bot(ex)
             revisar_zonas(ex)
         except Exception as e:
@@ -1656,6 +1691,11 @@ def cmd_mercado(message):
                 lineas.append("   " + mov)
         except Exception as e:
             lineas.append(f"• {coin}: no pude leer el mercado ({e})")
+    b = bloqueo_noticias()
+    if b:
+        nombre, cuando = b
+        hasta = cuando + timedelta(minutes=VENTANA_POST_MIN) - timedelta(hours=4)
+        lineas.append(f"⏸️ Bloqueo por noticias: {nombre} (sin entradas nuevas hasta las {hasta.strftime('%H:%M')} hora Caracas)")
     lineas += ["", "Un 'PUNTO DE ENTRADA' llega solo con botones; esto es para mirar cuando quieras."]
     bot.send_message(message.chat.id, "\n".join(lineas))
 
