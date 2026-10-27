@@ -499,7 +499,7 @@ def bucle_trading_automatico():
                             if hay_posicion:
                                 texto += f"\n\nℹ️ Ya tienes una posición de {coin}: no abro otra encima."
                             if ULTIMO_CHAT_ID:
-                                bot.send_message(ULTIMO_CHAT_ID, texto, reply_markup=markup)
+                                enviar_senal_con_grafico(ULTIMO_CHAT_ID, coin, senal, texto, markup, timeframe="1h")
                             avisos_hoy['n'] += 1
                             if coin == 'BTC':
                                 lider_btc.update(tipo=senal['tipo'], ts=time.time())
@@ -610,7 +610,7 @@ def revisar_zonas(ex):
                     enviar_dueno(texto, m)
                 else:
                     senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
-                    enviar_dueno(texto, teclado_entrada(coin, s['tipo']))
+                    enviar_senal_con_grafico(DUENO_ID, coin, s, texto, teclado_entrada(coin, s['tipo']), velas=v15)
                 avisos_hoy['n'] += 1
                 if coin == 'BTC' and avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']):
                     lider_btc.update(tipo=s['tipo'], ts=time.time())
@@ -1117,6 +1117,43 @@ def enviar_dueno(texto, markup=None):
         bot.send_message(DUENO_ID, texto, reply_markup=markup)
     except Exception as e:
         print(f"No pude enviar el mensaje a Telegram: {e}")
+
+
+def enviar_senal_con_grafico(chat_id, coin, senal, texto, markup=None, velas=None, timeframe="15m"):
+    """Señal de entrada con el dibujo de la operación (velas, EMAs, entrada/stop/meta,
+    soporte/resistencia). Si el dibujo o la foto fallan, manda solo el texto: la señal
+    nunca se pierde por el dibujo. Sin velas, las busca en MEXC (250 cerradas)."""
+    try:
+        import io
+        import grafico
+        if velas is None:
+            ex = crear_instancia_exchange('swap')
+            ahora = int(time.time() * 1000)
+            tf_ms = {"15m": 900000, "1h": 3600000}.get(timeframe, 900000)
+            velas = senales.solo_cerradas(
+                ex.fetch_ohlcv(f"{coin}/USDT:USDT", timeframe=timeframe,
+                               since=ahora - 250 * tf_ms, limit=250), tf_ms, ahora)
+        png = grafico.dibujar_operacion(coin, velas, senal)
+        foto = io.BytesIO(png)
+        foto.name = f"{coin}_operacion.png"
+        if len(texto) <= 1024:
+            bot.send_photo(chat_id, foto, caption=texto, reply_markup=markup)
+        else:
+            fmt = lambda x: f"{x:,.2f}" if abs(x) >= 1 else f"{x:.6f}"
+            p = float(senal["precio"])
+            largo = senal["direccion"] == "LONG"
+            sl = p * (1 - senal["sl_pct"] / 100) if largo else p * (1 + senal["sl_pct"] / 100)
+            tp = p * (1 + senal["tp_pct"] / 100) if largo else p * (1 - senal["tp_pct"] / 100)
+            bot.send_photo(chat_id, foto,
+                           caption=f"📊 {coin} {senal['tipo']} — Entrada ${fmt(p)} · Stop ${fmt(sl)} · Meta ${fmt(tp)}")
+            bot.send_message(chat_id, texto, reply_markup=markup)
+        return
+    except Exception as e:
+        print(f"No pude enviar la señal de {coin} con dibujo: {e}")
+    try:
+        bot.send_message(chat_id, texto, reply_markup=markup)
+    except Exception as e:
+        print(f"No pude enviar la señal de {coin} ni como texto: {e}")
 
 def adoptar_posicion(ex, p, modo, precio=None):
     """Empieza a gestionar una posición que el bot no abrió (modo 'trailing' o 'vigilar')."""
