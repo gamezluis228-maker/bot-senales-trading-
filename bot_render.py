@@ -1655,6 +1655,8 @@ def mostrar_menu_principal(message):
     markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
     markup.add(InlineKeyboardButton("📊 Backtest 30 días", callback_data="backtest_go"))
     linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + (f"no pude leerlas ahora ({_ultimo_error_activas[0]})" if n_activas is None else str(n_activas)))
+    cfg = avisos.config()
+    linea_activas += chr(10) + f"🎚️ Sensibilidad: {cfg['sensibilidad'].upper()} " + ("(solo señales VERDADERAS)" if cfg['sensibilidad'] == 'estricta' else "(también señales PROBABLES)") + chr(10) + f"🔔 Avisos de entrada: {'ON' if cfg['activo'] else 'OFF'}"
     bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /saldo - Tu saldo en MEXC y ganancia/pérdida abierta\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos\n• /backtest - Probar la estrategia con datos pasados", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
