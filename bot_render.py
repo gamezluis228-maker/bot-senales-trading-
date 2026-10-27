@@ -610,7 +610,7 @@ def revisar_zonas(ex):
                     enviar_dueno(texto, m)
                 else:
                     senales_pendientes[(coin, s['tipo'])] = dict(s, creada=ahora)
-                    enviar_senal_con_grafico(DUENO_ID, coin, s, texto, teclado_entrada(coin, s['tipo']), velas=v15)
+                    enviar_senal_con_grafico(DUENO_ID, coin, s, texto, teclado_entrada(coin, s['tipo']), timeframe="15m")
                 avisos_hoy['n'] += 1
                 if coin == 'BTC' and avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']):
                     lider_btc.update(tipo=s['tipo'], ts=time.time())
@@ -1119,33 +1119,38 @@ def enviar_dueno(texto, markup=None):
         print(f"No pude enviar el mensaje a Telegram: {e}")
 
 
-def enviar_senal_con_grafico(chat_id, coin, senal, texto, markup=None, velas=None, timeframe="15m"):
-    """Señal de entrada con el dibujo de la operación (velas, EMAs, entrada/stop/meta,
-    soporte/resistencia). Si el dibujo o la foto fallan, manda solo el texto: la señal
-    nunca se pierde por el dibujo. Sin velas, las busca en MEXC (250 cerradas)."""
+def enviar_senal_con_grafico(chat_id, coin, senal, texto, markup=None, timeframe="15m",
+                             stop=None, meta=None, caption_corta=None):
+    """Señal de entrada o de salida con el dibujo de la operación en vivo: velas
+    cerradas + la vela en formación de MEXC de esa moneda, EMAs, entrada/stop/meta,
+    soporte/resistencia. Solo añade la foto: el texto, los botones y la estrategia
+    quedan exactamente igual. Si el dibujo o la foto fallan, manda solo el texto:
+    la señal nunca se pierde por el dibujo."""
     try:
         import io
         import grafico
-        if velas is None:
-            ex = crear_instancia_exchange('swap')
-            ahora = int(time.time() * 1000)
-            tf_ms = {"15m": 900000, "1h": 3600000}.get(timeframe, 900000)
-            velas = senales.solo_cerradas(
-                ex.fetch_ohlcv(f"{coin}/USDT:USDT", timeframe=timeframe,
-                               since=ahora - 250 * tf_ms, limit=250), tf_ms, ahora)
-        png = grafico.dibujar_operacion(coin, velas, senal)
+        ex = crear_instancia_exchange('swap')
+        ahora = int(time.time() * 1000)
+        tf_ms = {"15m": 900000, "1h": 3600000}.get(timeframe, 900000)
+        crudo = ex.fetch_ohlcv(f"{coin}/USDT:USDT", timeframe=timeframe,
+                               since=ahora - 250 * tf_ms, limit=250)
+        velas = senales.solo_cerradas(crudo, tf_ms, ahora)
+        viva = crudo[-1] if crudo and velas and crudo[-1][0] != velas[-1][0] else None
+        png = grafico.dibujar_operacion(coin, velas, senal, vela_viva=viva, stop=stop, meta=meta)
         foto = io.BytesIO(png)
         foto.name = f"{coin}_operacion.png"
         if len(texto) <= 1024:
             bot.send_photo(chat_id, foto, caption=texto, reply_markup=markup)
         else:
-            fmt = lambda x: f"{x:,.2f}" if abs(x) >= 1 else f"{x:.6f}"
-            p = float(senal["precio"])
-            largo = senal["direccion"] == "LONG"
-            sl = p * (1 - senal["sl_pct"] / 100) if largo else p * (1 + senal["sl_pct"] / 100)
-            tp = p * (1 + senal["tp_pct"] / 100) if largo else p * (1 - senal["tp_pct"] / 100)
-            bot.send_photo(chat_id, foto,
-                           caption=f"📊 {coin} {senal['tipo']} — Entrada ${fmt(p)} · Stop ${fmt(sl)} · Meta ${fmt(tp)}")
+            if caption_corta is None:
+                fmt = lambda x: f"{x:,.2f}" if abs(x) >= 1 else f"{x:.6f}"
+                p = float(senal["precio"])
+                largo = senal["direccion"] == "LONG"
+                sl = p * (1 - senal["sl_pct"] / 100) if largo else p * (1 + senal["sl_pct"] / 100)
+                tp = p * (1 + senal["tp_pct"] / 100) if largo else p * (1 - senal["tp_pct"] / 100)
+                caption_corta = (f"📊 {coin} {senal['tipo']} — Entrada ${fmt(p)} · "
+                                 f"Stop ${fmt(sl)} · Meta ${fmt(tp)}")
+            bot.send_photo(chat_id, foto, caption=caption_corta)
             bot.send_message(chat_id, texto, reply_markup=markup)
         return
     except Exception as e:
@@ -1316,8 +1321,16 @@ def vigilar_movimiento(coin, pos, precio):
                 encabezado = f"🚨🚨 SALIR {coin} 🚨🚨\n\n⚠️ Es una posición adoptada (la abriste tú): el bot recomienda salir ahora."
             else:
                 encabezado = f"💡 Posible momento de salir de {coin}"
-            enviar_dueno(encabezado + "\n\n" + "\n".join(f"• {x}" for x in motivos) + "\n\n"
-                         + posiciones.texto_posicion(coin, pos, precio, pos['margen'], pos['apalancamiento'], pos.get('liquidacion')), m)
+            enviar_senal_con_grafico(DUENO_ID, coin,
+                                     {"tipo": "COMPRA" if pos["lado"] == "buy" else "VENTA",
+                                      "direccion": "LONG" if pos["lado"] == "buy" else "SHORT",
+                                      "precio": float(pos["entrada"]), "sl_pct": 0, "tp_pct": 0,
+                                      "titulo": "SALIR"},
+                                     encabezado + "\n\n" + "\n".join(f"• {x}" for x in motivos) + "\n\n"
+                                     + posiciones.texto_posicion(coin, pos, precio, pos['margen'], pos['apalancamiento'], pos.get('liquidacion')),
+                                     m, timeframe="15m",
+                                     stop=float(pos["sl"]) if pos.get("sl") else None, meta=None,
+                                     caption_corta=f"📊 SALIR {coin} {'LONG' if pos['lado'] == 'buy' else 'SHORT'} — Entrada ${float(pos['entrada']):,.2f} · Ahora ${float(precio):,.2f}")
 
 def cerrar_desde_boton(ex, coin):
     """Cierra a mercado una posición (la gestione el bot o no). Devuelve (ok, mensaje_si_no_ok)."""

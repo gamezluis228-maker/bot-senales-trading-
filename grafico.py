@@ -55,22 +55,31 @@ def _linea_punteada(dib, x0, x1, y, color):
         x += 20
 
 
-def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
+def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR, vela_viva=None, stop=None, meta=None):
     """Devuelve el PNG (bytes) con el dibujo de la operación.
 
     senal trae: tipo (COMPRA/VENTA), direccion (LONG/SHORT), precio, sl_pct, tp_pct,
     titulo; y opcionalmente soporte/resistencia (las señales de senales.py las traen;
     las de avisos no, y entonces se calculan de la ventana mostrada).
+    velas son las CERRADAS; vela_viva (opcional) es la vela en formación de MEXC y se
+    dibuja hueca con la etiqueta EN VIVO, para que el dibujo muestre el precio live
+    del momento del envío y no solo el último cierre.
+    stop/meta explícitos (para las alertas de salida, donde el stop es el trailing del
+    bot y no hay meta fija): si vienen, se usan; si no, se calculan con sl_pct/tp_pct;
+    una meta None no se dibuja.
     """
     if len(velas) < 10:
         raise ValueError("muy pocas velas para dibujar")
     largo = senal["direccion"] == "LONG"
     p = float(senal["precio"])
-    sl = p * (1 - senal["sl_pct"] / 100) if largo else p * (1 + senal["sl_pct"] / 100)
-    tp = p * (1 + senal["tp_pct"] / 100) if largo else p * (1 - senal["tp_pct"] / 100)
+    if stop is None:
+        stop = p * (1 - senal["sl_pct"] / 100) if largo else p * (1 + senal["sl_pct"] / 100)
+    if meta is None and senal.get("tp_pct"):
+        meta = p * (1 + senal["tp_pct"] / 100) if largo else p * (1 - senal["tp_pct"] / 100)
 
     v = list(velas[-max(n_mostrar, 30):])
     n = len(v)
+    n_total = n + (1 if vela_viva else 0)
     cierres = np.asarray([x[4] for x in velas], dtype=float)
     altos = np.asarray([x[2] for x in v], dtype=float)
     bajos = np.asarray([x[3] for x in v], dtype=float)
@@ -91,8 +100,11 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
         res = res or res_c
         sop = sop or sop_c
 
-    lo = min(float(bajos.min()), sl, tp, sop)
-    hi = max(float(altos.max()), sl, tp, res)
+    lo = min(float(bajos.min()), p, sop, *(x for x in (stop, meta) if x is not None))
+    hi = max(float(altos.max()), p, res, *(x for x in (stop, meta) if x is not None))
+    if vela_viva:
+        lo = min(lo, float(vela_viva[3]))
+        hi = max(hi, float(vela_viva[2]))
     pad = (hi - lo) * 0.06 or 1.0
     lo -= pad
     hi += pad
@@ -107,7 +119,7 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
         return top + (hi - precio) / (hi - lo) * plot_alto
 
     def x_de(i):
-        return margen_izq + (i + 0.5) * plot_ancho / n
+        return margen_izq + (i + 0.5) * plot_ancho / n_total
 
     # Rejilla
     for k in range(5):
@@ -115,7 +127,7 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
         dib.line([(margen_izq, y), (ANCHO - margen_der, y)], fill=REJILLA, width=1)
 
     # Velas
-    ancho_cuerpo = max(2.0, plot_ancho / n * 0.7)
+    ancho_cuerpo = max(2.0, plot_ancho / n_total * 0.7)
     for i, vela in enumerate(v):
         o, h, l, c = float(vela[1]), float(vela[2]), float(vela[3]), float(vela[4])
         color = VERDE if c >= o else ROJO
@@ -123,6 +135,18 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
         dib.line([(x, y_de(h)), (x, y_de(l))], fill=color, width=1)
         dib.rectangle([x - ancho_cuerpo / 2, y_de(max(o, c)), x + ancho_cuerpo / 2, y_de(min(o, c))],
                       fill=color)
+    if vela_viva:
+        # Vela en formación: hueca, para distinguirla de las cerradas
+        o, h, l, c = (float(vela_viva[k]) for k in (1, 2, 3, 4))
+        color = VERDE if c >= o else ROJO
+        x = x_de(n)
+        dib.line([(x, y_de(h)), (x, y_de(l))], fill=color, width=1)
+        dib.rectangle([x - ancho_cuerpo / 2, y_de(max(o, c)), x + ancho_cuerpo / 2, y_de(min(o, c))],
+                      outline=color, width=2)
+        etiqueta = "EN VIVO"
+        fnt = _fuente(True, 12)
+        ancho_txt = dib.textlength(etiqueta, font=fnt)
+        dib.text((x - ancho_txt / 2, y_de(h) - 18), etiqueta, font=fnt, fill=ENTRADA)
 
     # EMAs (se saltan los NaN del inicio de cada serie)
     for periodo, (serie, color) in emas.items():
@@ -132,8 +156,13 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
 
     # Líneas de la operación: nombre + precio en la caja derecha; las cajas se
     # separan un mínimo para no taparse cuando dos niveles casi coinciden
-    lineas = [(ENTRADA, "ENTRADA", p), (STOP, "STOP", sl), (META, "META", tp),
-              (SOPORTE, "SOPORTE", sop), (RESISTENCIA, "RESIST.", res)]
+    lineas = [(ENTRADA, "ENTRADA", p)]
+    if stop:
+        lineas.append((STOP, "STOP", stop))
+    if meta:
+        lineas.append((META, "META", meta))
+    lineas.append((SOPORTE, "SOPORTE", sop))
+    lineas.append((RESISTENCIA, "RESIST.", res))
     cajas = []
     for color, nombre, precio in lineas:
         y = min(max(y_de(precio), top), top + plot_alto)
@@ -155,7 +184,9 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR):
              f"{coin} {senal['tipo']}  —  {senal.get('titulo', '')}",
              font=_fuente(True, 20), fill=TEXTO)
     dib.text((margen_izq, 36),
-             f"Entrada ${_fmt(p)}   Stop ${_fmt(sl)}   Meta ${_fmt(tp)}",
+             "   ".join(x for x in (f"Entrada ${_fmt(p)}",
+                                    f"Stop ${_fmt(stop)}" if stop else None,
+                                    f"Meta ${_fmt(meta)}" if meta else None) if x),
              font=_fuente(False, 15), fill=TEXTO)
     ley_x = margen_izq
     for nombre, color in (("EMA9", EMA9), ("EMA21", EMA21), ("EMA200", EMA200)):
