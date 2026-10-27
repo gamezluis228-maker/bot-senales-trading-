@@ -66,17 +66,24 @@ def _es_cruce_valido(s):
 def _cruces_directos(v_prim, ts, tend4h, tend_btc):
     """Señales de cruce con la función REAL de senales (_cruce_ema_rsi), sin pasar
     por evaluar() (que además calcula niveles, ADX y volumen para los otros
-    tipos de señal que el backtest no usa). El cruce solo evalúa RSI, EMA200,
-    tendencia 4H y BTC; el resto de campos que _armar copia a la señal son
-    metadatos de pantalla que el backtest no lee, así que van con valores
-    neutros. El resultado es idéntico al cruce que devolvería evaluar()."""
+    tipos de señal que el backtest no usa). RSI, EMA200, ADX y volumen SÍ se
+    calculan de verdad con las mismas fórmulas que _metricas; el resto de
+    campos que _armar copia a la señal son metadatos de pantalla que el
+    backtest no lee. El resultado es idéntico al cruce que devolvería evaluar()."""
     cierres = [v[4] for v in v_prim]
     c = cierres[-1]
     arr = np.asarray(cierres, dtype=float)
+    h = np.asarray([v[2] for v in v_prim], dtype=float)
+    l = np.asarray([v[3] for v in v_prim], dtype=float)
+    vol = np.asarray([v[5] for v in v_prim], dtype=float)
+    ax = ind.adx_serie(h, l, arr, 14)
+    adx_val = float(ax["adx"][-1]) if ax is not None else 0.0
+    vol_prom = float(vol[-21:-1].mean()) if len(vol) > 21 else 0.0
+    vol_rel = float(vol[-1] / vol_prom) if vol_prom > 0 else 0.0
     m = {"c": float(c), "rsi": float(ind.rsi(arr, 14)),
          "ema200": float(ind.ultima_ema(arr, 200)),
          "atr": 1.0, "ema20": float(c), "ema50": float(c), "res": float(c), "sop": float(c),
-         "adx": 0.0, "vol_rel": 0.0, "ts": int(ts)}
+         "adx": adx_val, "vol_rel": vol_rel, "ts": int(ts)}
     out = []
     for direccion in ("LONG", "SHORT"):
         try:

@@ -264,6 +264,8 @@ def _cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc):
         (rsi_ok, f"RSI {m['rsi']:.1f} ({'< 65' if largo else '> 35'})"),
         (tend_ok, f"Precio {'sobre' if largo else 'bajo'} EMA200 ({m['ema200']:.2f})"),
         (tend4h == ("ALCISTA" if largo else "BAJISTA"), f"Tendencia 4H a favor ({tend4h})"),
+        (m["adx"] >= 20, f"ADX {m['adx']:.1f} (≥20, hay tendencia)"),
+        (m["vol_rel"] >= 1.0, f"Volumen {m['vol_rel']:.1f}x del promedio (≥1,0x)"),
     ]
     if tend_btc is not None:
         contra = "BAJISTA" if largo else "ALCISTA"
