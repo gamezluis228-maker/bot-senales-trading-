@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import time
@@ -71,6 +72,37 @@ GRACIA_POSICION_SEG = 90          # tiempo para que MEXC muestre una posición r
 INTERVALO_DETECCION_SEG = 60      # cada cuánto busca posiciones abiertas que el bot no gestiona (p. ej. las tuyas)
 INTERVALO_EVAL_SALIDA_SEG = 300   # cada cuánto evalúa si conviene sugerirte salir de una posición
 
+# --- Adoptar solas las posiciones manuales (solo operables; BTC nunca se opera, solo es indicador) ---
+AJUSTES_PATH = os.getenv("AJUSTES_PATH", "ajustes_bot.json")
+
+def _leer_ajustes():
+    try:
+        with open(AJUSTES_PATH, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def _escribir_ajustes(d):
+    try:
+        tmp = AJUSTES_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, AJUSTES_PATH)
+    except OSError:
+        pass
+
+ADOPTAR_MANUALES_AUTO = bool(_leer_ajustes().get("adoptar_manuales", False))  # OFF por defecto
+
+def cambiar_adoptar_manuales():
+    """Enciende/apaga la adopción automática de manuales. Devuelve el nuevo estado."""
+    global ADOPTAR_MANUALES_AUTO
+    ADOPTAR_MANUALES_AUTO = not ADOPTAR_MANUALES_AUTO
+    d = _leer_ajustes()
+    d["adoptar_manuales"] = ADOPTAR_MANUALES_AUTO
+    _escribir_ajustes(d)
+    return ADOPTAR_MANUALES_AUTO
+
 posiciones_gestionadas = {}       # moneda -> estado de la posición (stop que sigue al precio)
 posiciones_avisadas = {}          # moneda -> (lado, entrada) de la posición ya ofrecida para gestionar
 ultima_orden_ts = {}              # moneda -> cuándo el bot envió su última orden (evita ofrecer lo que acaba de abrir)
@@ -80,8 +112,9 @@ avisos_hoy = {'fecha': '', 'n': 0}  # contador diario de avisos de entrada (anti
 ultima_zona = {}                  # (moneda, tipo) -> hora del último aviso de zona
 senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
-MONEDAS_TRADING = ["BTC", "ETH", "ZEC"]      # Señales y alertas: las tres, como siempre
-MONEDAS_OPERABLES = ["ETH", "ZEC"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
+MONEDAS_TRADING = ["BTC", "ETH", "ZEC", "PAXG", "UKOIL"]  # Señales y alertas: BTC + operables (PAXG = oro, UKOIL = Brent)
+MONEDAS_OPERABLES = ["ETH", "ZEC", "PAXG", "UKOIL"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
+SIN_FILTRO_BTC = ["PAXG", "UKOIL"]  # Oro y Brent: SIN filtro BTC y SIN avisos de "BTC manda" (muchas veces se mueven al revés de BTC)
 
 # --- Red pública de noticias: el bot lee noticias cripto y avisa, NUNCA pausa señales ---
 # Fuentes RSS públicas, sin claves. Si una noticia importante y reciente puede mover a BTC,
@@ -150,7 +183,7 @@ def avisar_noticias_nuevas():
         _vistas_noticias = set(list(_vistas_noticias)[-50:])
     for t in nuevas[:3]:
         avisar(f"📰 Noticia importante para BTC:\n{t}\nEl bot sigue mandando señales; opera con cuidado.")
-MONEDAS_REPORTE = ["BTC", "ETH", "ZEC"]
+MONEDAS_REPORTE = ["BTC", "ETH", "ZEC", "PAXG", "UKOIL"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
 
@@ -331,7 +364,7 @@ def detectar_rompimiento(symbol, mercado='swap'):
         v1h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='1h', since=ahora - 300 * 3600000, limit=300), 3600000, ahora)
         v4h = senales.solo_cerradas(ex.fetch_ohlcv(market_symbol, timeframe='4h', since=ahora - 120 * 14400000, limit=120), 14400000, ahora)
         vbtc = None
-        if symbol != 'BTC':
+        if symbol != 'BTC' and symbol not in SIN_FILTRO_BTC:
             try:
                 btc_symbol = "BTC/USDT:USDT" if mercado == 'swap' else "BTC/USDT"
                 vbtc = senales.solo_cerradas(ex.fetch_ohlcv(btc_symbol, timeframe='1h', since=ahora - 120 * 3600000, limit=120), 3600000, ahora)
@@ -457,11 +490,11 @@ def bucle_trading_automatico():
                             if not hay_posicion:
                                 senales_pendientes[(coin, senal['tipo'])] = dict(senal, creada=time.time())
                                 markup = teclado_entrada(coin, senal['tipo'])
-                            lider = lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None
+                            lider = None if coin in SIN_FILTRO_BTC else (lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None)
                             texto = "🚨 SEÑAL 1H 🚨\n\n" + avisos.texto_alerta(coin, senal, lider)
                             ctx = contexto_noticias()
                             if ctx:
-                                texto += f"\n\n📰 Noticia que puede mover a BTC: {ctx}"
+                                texto += f"\n\n📰 Noticia que puede mover {'al mercado' if coin in SIN_FILTRO_BTC else 'a BTC'}: {ctx}"
                             if hay_posicion:
                                 texto += f"\n\nℹ️ Ya tienes una posición de {coin}: no abro otra encima."
                             if ULTIMO_CHAT_ID:
@@ -501,7 +534,7 @@ def obtener_velas_zona(coin, ex=None):
     v1h = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='1h', since=ahora - 300 * 3600000, limit=300), 3600000, ahora)
     v4h = senales.solo_cerradas(ex.fetch_ohlcv(ms, timeframe='4h', since=ahora - 120 * 14400000, limit=120), 14400000, ahora)
     vbtc = None
-    if coin != 'BTC':
+    if coin != 'BTC' and coin not in SIN_FILTRO_BTC:
         try:
             vbtc = senales.solo_cerradas(ex.fetch_ohlcv("BTC/USDT:USDT", timeframe='1h', since=ahora - 120 * 3600000, limit=120), 3600000, ahora)
         except Exception as e:
@@ -518,10 +551,11 @@ def _posicion_real(ex, coin):
         return None
 
 def _avisar_lider(ex, s):
-    """BTC manda: si BTC va con fuerza en un sentido y tienes ETH/ZEC abiertas en contra, te lo dice y ofrece cerrar."""
+    """BTC manda: si BTC va con fuerza en un sentido y tienes ETH/ZEC abiertas en contra, te lo dice y ofrece cerrar.
+    No aplica a PAXG ni UKOIL: el oro y el Brent muchas veces se mueven al revés de BTC."""
     lado_btc = 'buy' if s['tipo'] == 'COMPRA' else 'sell'
     for coin in MONEDAS_TRADING:
-        if coin == 'BTC':
+        if coin == 'BTC' or coin in SIN_FILTRO_BTC:
             continue
         lado_real = _posicion_real(ex, coin)
         clave = ('lider', coin, s['tipo'])
@@ -561,11 +595,11 @@ def revisar_zonas(ex):
                 if not avisos.pasa_filtro(s['veredicto'], cfg['sensibilidad']) or not _cupo_avisos():
                     continue
                 texto = avisos.encabezado(s) + "\n\n"
-                lider = lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None
+                lider = None if coin in SIN_FILTRO_BTC else (lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None)
                 texto += avisos.texto_alerta(coin, s, lider)
                 ctx = contexto_noticias()
                 if ctx:
-                    texto += f"\n\n📰 Noticia que puede mover a BTC: {ctx}"
+                    texto += f"\n\n📰 Noticia que puede mover {'al mercado' if coin in SIN_FILTRO_BTC else 'a BTC'}: {ctx}"
                 if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar
                     m = InlineKeyboardMarkup(row_width=2)
                     m.add(InlineKeyboardButton(f"❌ Cerrar mi {coin}", callback_data=f"pos_cl_{coin}"),
@@ -1170,6 +1204,16 @@ def detectar_posiciones_nuevas(ex):
                          + posiciones.texto_posicion(coin, pos, pos['ultimo_precio'], pos['margen'], pos['apalancamiento'], pos.get('liquidacion')),
                          teclado_posicion(coin, pos, True))
             continue
+        if ADOPTAR_MANUALES_AUTO and coin in MONEDAS_OPERABLES:
+            # Adopción automática: solo monedas operables (BTC nunca se opera, solo es indicador).
+            # Nunca cierra solo por adoptarla (lo garantiza crear_posicion_adoptada).
+            pos, nota = adoptar_posicion(ex, p, 'trailing')
+            enviar_dueno(f"🤖 Adopté sola tu posición manual de {coin} con trailing.\n"
+                         f"Entrada: ${posiciones.fmt_precio(pos['entrada'])} | Stop del bot: ${posiciones.fmt_precio(pos['sl'])}"
+                         + (f"\n⚠️ {nota}" if nota else "") + "\n\n"
+                         + posiciones.texto_posicion(coin, pos, pos['ultimo_precio'], pos['margen'], pos['apalancamiento'], pos.get('liquidacion')),
+                         teclado_posicion(coin, pos, True))
+            continue
         enviar_oferta_adopcion(ex, p)
     for coin in [c for c in posiciones_avisadas if c not in vivas]:
         posiciones_avisadas.pop(coin, None)
@@ -1230,7 +1274,11 @@ def vigilar_movimiento(coin, pos, precio):
             m.add(InlineKeyboardButton("❌ Cerrar ahora", callback_data=f"pos_cl_{coin}"),
                   InlineKeyboardButton("✋ Mantener", callback_data=f"pos_clno_{coin}"))
             m.add(InlineKeyboardButton("🔒 Asegurar entrada", callback_data=f"pos_be_{coin}"))
-            enviar_dueno(f"💡 Posible momento de salir de {coin}\n\n" + "\n".join(f"• {x}" for x in motivos) + "\n\n"
+            if pos.get('adoptada'):
+                encabezado = f"🚨🚨 SALIR {coin} 🚨🚨\n\n⚠️ Es una posición adoptada (la abriste tú): el bot recomienda salir ahora."
+            else:
+                encabezado = f"💡 Posible momento de salir de {coin}"
+            enviar_dueno(encabezado + "\n\n" + "\n".join(f"• {x}" for x in motivos) + "\n\n"
                          + posiciones.texto_posicion(coin, pos, precio, pos['margen'], pos['apalancamiento'], pos.get('liquidacion')), m)
 
 def cerrar_desde_boton(ex, coin):
@@ -1447,6 +1495,12 @@ def cmd_activas(message):
         m.add(InlineKeyboardButton("🎛️ Ver con botones (cerrar, asegurar...)", callback_data="activas_ver"))
     bot.send_message(message.chat.id, texto, reply_markup=m)
 
+def enviar_toggle_autoadopt(chat_id):
+    """Botón ON/OFF para adoptar solas las manuales (solo ETH/ZEC, nunca BTC)."""
+    m = InlineKeyboardMarkup(row_width=1)
+    m.add(InlineKeyboardButton(f"🤖 Adoptar mis manuales: {'ON ✅' if ADOPTAR_MANUALES_AUTO else 'OFF ⏸️'}", callback_data="autoadopt_toggle"))
+    bot.send_message(chat_id, "Adoptar mis manuales (solo operables: ETH, ZEC, PAXG, UKOIL; nunca BTC): el bot adopta sola cada posición manual nueva con trailing.", reply_markup=m)
+
 @bot.message_handler(commands=['posiciones'], func=es_dueno)
 def ver_posiciones(message):
     global ULTIMO_CHAT_ID
@@ -1459,6 +1513,7 @@ def ver_posiciones(message):
         return
     if not abiertas:
         bot.send_message(message.chat.id, "📭 No tienes posiciones abiertas en MEXC.")
+        enviar_toggle_autoadopt(message.chat.id)
         return
     for p in abiertas:
         try:
@@ -1466,6 +1521,7 @@ def ver_posiciones(message):
             bot.send_message(message.chat.id, texto, reply_markup=markup)
         except Exception as e:
             bot.send_message(message.chat.id, f"⚠️ No pude mostrar {p['coin']}: {e}")
+    enviar_toggle_autoadopt(message.chat.id)
 
 @bot.message_handler(commands=['saldo'], func=es_dueno)
 def ver_saldo(message):
@@ -1570,7 +1626,9 @@ def menu_analisis(message):
         InlineKeyboardButton("🟣 SOL", callback_data="ana_SOL"),
         InlineKeyboardButton("🟠 DOGE", callback_data="ana_DOGE"),
         InlineKeyboardButton("🟡 ZEC", callback_data="ana_ZEC"),
-        InlineKeyboardButton("🐸 PEPE", callback_data="ana_PEPE")
+        InlineKeyboardButton("🐸 PEPE", callback_data="ana_PEPE"),
+        InlineKeyboardButton("🥇 PAXG (Oro)", callback_data="ana_PAXG"),
+        InlineKeyboardButton("🛢️ UKOIL (Brent)", callback_data="ana_UKOIL")
     )
     bot.send_message(message.chat.id, "🔍 **Selecciona el activo para análisis técnico:**", reply_markup=markup, parse_mode="Markdown")
 
@@ -1904,6 +1962,14 @@ def callback_query(call):
                     m = InlineKeyboardMarkup(row_width=1)
                     m.add(InlineKeyboardButton("🎛️ Ver con botones (cerrar, asegurar...)", callback_data="activas_ver"))
                 bot.send_message(call.message.chat.id, texto, reply_markup=m)
+
+        # === ADOPTAR MANUALES AUTOMÁTICO: ON/OFF ===
+        elif accion == "autoadopt":
+            nuevo = cambiar_adoptar_manuales()
+            bot.answer_callback_query(call.id, f"Adoptar mis manuales: {'ON' if nuevo else 'OFF'}")
+            bot.send_message(call.message.chat.id,
+                             f"🤖 Adoptar mis manuales: {'ON ✅' if nuevo else 'OFF ⏸️'}\n"
+                             + ("El bot adoptará solas tus posiciones manuales de ETH y ZEC con trailing (las detecta cada 60 s)." if nuevo else "El bot ya no adoptará solas tus posiciones manuales; te las seguirá ofreciendo con botones."))
 
         elif accion in ("pos", "padopt", "pign"):
             accion_posicion(call, datos)
