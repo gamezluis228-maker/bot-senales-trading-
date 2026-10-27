@@ -19,6 +19,7 @@ import prediccion
 import historial
 import avisos
 import modos
+import backtest
 
 secrets_dir = "/etc/secrets"
 if os.path.exists(secrets_dir):
@@ -1639,6 +1640,52 @@ def menu_predicciones(message):
     markup = InlineKeyboardMarkup(row_width=3)
     markup.add(*[InlineKeyboardButton(f"🔮 {c}", callback_data=f"pred_{c}") for c in MONEDAS_PREDICCION])
     bot.send_message(message.chat.id, "🔮 **PREDICCIONES 5 MINUTOS** 🔮\n\nElige el activo para analizar:", reply_markup=markup, parse_mode="Markdown")
+
+_backtest_en_curso = False
+
+def _correr_backtest(chat_id, args):
+    """Backtest en hilo aparte (puede tardar minutos): avisa en el mismo chat al terminar."""
+    global _backtest_en_curso
+    try:
+        monedas, dias, tf = [], 30, "15m"
+        for a in args:
+            au = a.upper()
+            if au in MONEDAS_OPERABLES + ["BTC"]:
+                monedas.append(au)
+            elif au in ("15M", "1H"):
+                tf = au.lower()
+            elif au.isdigit():
+                dias = max(7, min(365, int(au)))
+        if not monedas:
+            monedas = list(MONEDAS_OPERABLES)
+        bot.send_message(chat_id, f"⏳ Calculando backtest {tf} ({dias} días) para {', '.join(monedas)}... puede tardar un par de minutos. Te aviso aquí mismo cuando esté.")
+        ex = crear_instancia_exchange('swap')
+        resultados, partes = [], []
+        for coin in monedas:
+            res = backtest.ejecutar(ex, coin, dias, tf, SIN_FILTRO_BTC)
+            resultados.append(res)
+            partes.append(backtest.formatear(res))
+        ok = [r for r in resultados if not r.get("error")]
+        if ok:
+            tot_n = sum(r["n"] for r in ok)
+            tot_r = round(sum(r["net_r"] for r in ok), 2)
+            partes.append(f"TOTAL: {tot_n} operaciones | Neto: {tot_r:+.2f}R")
+        partes.append("⚠️ El pasado no garantiza el futuro. Sin comisiones ni deslizamiento. Mide la estrategia, no los avisos.")
+        bot.send_message(chat_id, "\n\n".join(partes))
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ El backtest falló: {e}")
+    finally:
+        _backtest_en_curso = False
+
+@bot.message_handler(commands=['backtest'], func=es_dueno)
+def menu_backtest(message):
+    global _backtest_en_curso
+    if _backtest_en_curso:
+        bot.send_message(message.chat.id, "⏳ Ya hay un backtest corriendo, espera a que termine.")
+        return
+    _backtest_en_curso = True
+    args = (message.text or "").split()[1:]
+    threading.Thread(target=_correr_backtest, args=(message.chat.id, args), daemon=True).start()
 
 @bot.message_handler(commands=['estado'], func=es_dueno)
 def estado_posiciones(message):
