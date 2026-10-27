@@ -243,14 +243,22 @@ def home():
     return "Bot Activo - MEXC Conectados"
 
 def bucle_keep_alive():
+    # Solo mantiene despierto al bot: pega a la URL PUBLICA de Render cada 5 min.
+    # Un ping a localhost NO cuenta como trafico para Render, por eso ya no se usa.
+    # No toca senales, botones, estrategia ni ningun otro hilo.
+    url = os.getenv("KEEPALIVE_URL") or RENDER_APP_URL
+    if url:
+        print(f"Keep-alive: ping a {url} cada 300s")
+    else:
+        print("Keep-alive: SIN URL publica (falta RENDER_EXTERNAL_URL); el bot puede dormirse")
     time.sleep(15)
     while True:
         try:
-            url = RENDER_APP_URL if RENDER_APP_URL else "http://127.0.0.1:10000/"
-            requests.get(url, timeout=10)
+            if url:
+                requests.get(url, timeout=10)
         except Exception as e:
             print(f"Error en Keep-Alive: {e}")
-        time.sleep(600)
+        time.sleep(300)
 
 def calcular_rsi(closes, period=14):
     return indicadores.rsi(closes, period)
