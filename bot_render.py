@@ -1663,9 +1663,16 @@ def _correr_backtest(chat_id, args):
         ex = crear_instancia_exchange('swap')
         resultados = []
         for coin in monedas:
-            res = backtest.ejecutar(ex, coin, dias, tf, SIN_FILTRO_BTC)
+            # Cada moneda aislada: si una falla, las demás igual llegan y el TOTAL igual se manda
+            try:
+                res = backtest.ejecutar(ex, coin, dias, tf, SIN_FILTRO_BTC)
+            except Exception as e:
+                res = {"coin": coin, "error": f"Falló inesperadamente: {e}"}
             resultados.append(res)
-            bot.send_message(chat_id, backtest.formatear(res))
+            try:
+                bot.send_message(chat_id, backtest.formatear(res))
+            except Exception:
+                pass  # un envío fallido no debe matar el resto del backtest
         ok = [r for r in resultados if not r.get("error")]
         if ok:
             tot_n = sum(r["n"] for r in ok)
