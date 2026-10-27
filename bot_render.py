@@ -1603,8 +1603,9 @@ def mostrar_menu_principal(message):
     )
     n_activas, _ = resumen_activas(con_analisis=False)
     markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
+    markup.add(InlineKeyboardButton("📊 Backtest 30 días", callback_data="backtest_go"))
     linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + (f"no pude leerlas ahora ({_ultimo_error_activas[0]})" if n_activas is None else str(n_activas)))
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /saldo - Tu saldo en MEXC y ganancia/pérdida abierta\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /saldo - Tu saldo en MEXC y ganancia/pérdida abierta\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos\n• /backtest - Probar la estrategia con datos pasados", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
@@ -1677,15 +1678,19 @@ def _correr_backtest(chat_id, args):
     finally:
         _backtest_en_curso = False
 
-@bot.message_handler(commands=['backtest'], func=es_dueno)
-def menu_backtest(message):
+def lanzar_backtest(chat_id, args):
+    """Lanza el backtest en hilo aparte si no hay otro corriendo."""
     global _backtest_en_curso
     if _backtest_en_curso:
-        bot.send_message(message.chat.id, "⏳ Ya hay un backtest corriendo, espera a que termine.")
+        bot.send_message(chat_id, "⏳ Ya hay un backtest corriendo, espera a que termine.")
         return
     _backtest_en_curso = True
+    threading.Thread(target=_correr_backtest, args=(chat_id, args), daemon=True).start()
+
+@bot.message_handler(commands=['backtest'], func=es_dueno)
+def menu_backtest(message):
     args = (message.text or "").split()[1:]
-    threading.Thread(target=_correr_backtest, args=(message.chat.id, args), daemon=True).start()
+    lanzar_backtest(message.chat.id, args)
 
 @bot.message_handler(commands=['estado'], func=es_dueno)
 def estado_posiciones(message):
@@ -2020,6 +2025,11 @@ def callback_query(call):
 
         elif accion in ("pos", "padopt", "pign"):
             accion_posicion(call, datos)
+
+        # === BACKTEST DESDE EL MENÚ ===
+        elif accion == "backtest":
+            bot.answer_callback_query(call.id, "Backtest en curso...")
+            lanzar_backtest(call.message.chat.id, [])
 
         # === MENÚ FUTUROS ===
         elif call.data == "menu_futuros":
