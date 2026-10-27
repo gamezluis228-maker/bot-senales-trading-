@@ -1659,20 +1659,19 @@ def _correr_backtest(chat_id, args):
                 dias = max(7, min(365, int(au)))
         if not monedas:
             monedas = list(MONEDAS_OPERABLES)
-        bot.send_message(chat_id, f"⏳ Calculando backtest {tf} ({dias} días) para {', '.join(monedas)}... puede tardar un par de minutos. Te aviso aquí mismo cuando esté.")
+        bot.send_message(chat_id, f"⏳ Calculando backtest {tf} ({dias} días) para {', '.join(monedas)}... te voy avisando moneda por moneda cuando cada una esté lista.")
         ex = crear_instancia_exchange('swap')
-        resultados, partes = [], []
+        resultados = []
         for coin in monedas:
             res = backtest.ejecutar(ex, coin, dias, tf, SIN_FILTRO_BTC)
             resultados.append(res)
-            partes.append(backtest.formatear(res))
+            bot.send_message(chat_id, backtest.formatear(res))
         ok = [r for r in resultados if not r.get("error")]
         if ok:
             tot_n = sum(r["n"] for r in ok)
             tot_r = round(sum(r["net_r"] for r in ok), 2)
-            partes.append(f"TOTAL: {tot_n} operaciones | Neto: {tot_r:+.2f}R")
-        partes.append("⚠️ El pasado no garantiza el futuro. Sin comisiones ni deslizamiento. Mide la estrategia, no los avisos.")
-        bot.send_message(chat_id, "\n\n".join(partes))
+            bot.send_message(chat_id, f"TOTAL: {tot_n} operaciones | Neto: {tot_r:+.2f}R")
+        bot.send_message(chat_id, "⚠️ El pasado no garantiza el futuro. Sin comisiones ni deslizamiento. Mide la estrategia, no los avisos.")
     except Exception as e:
         bot.send_message(chat_id, f"❌ El backtest falló: {e}")
     finally:

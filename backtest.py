@@ -1,9 +1,10 @@
 """Backtest de la estrategia REAL del bot sobre velas cerradas de MEXC.
 
-No es una copia de la estrategia: llama a senales.evaluar, la misma función que
-usa el bot en vivo, vela por vela, sin mirar al futuro (solo velas cerradas
-hasta cada punto). Mide la señal de cruce EMA 9/21 + RSI (VERDADERO/PROBABLE),
-que es la que genera la mayoría de entradas.
+No es una copia de la estrategia: llama a senales._cruce_ema_rsi, la misma
+función que usa el bot en vivo dentro de evaluar(), vela por vela, sin mirar
+al futuro (solo velas cerradas hasta cada punto). Mide la señal de cruce
+EMA 9/21 + RSI (VERDADERO/PROBABLE), que es la que genera la mayoría de
+entradas.
 
 Reglas de la simulación (iguales a la operación en vivo):
 - Entrada: al cierre de la vela donde se detecta la señal (en vivo la señal
@@ -20,6 +21,9 @@ Reglas de la simulación (iguales a la operación en vivo):
 import time
 from bisect import bisect_right
 
+import numpy as np
+
+import indicadores as ind
 import senales
 
 TF_MS = {"15m": 900000, "1h": 3600000, "4h": 14400000}
@@ -59,6 +63,51 @@ def _es_cruce_valido(s):
             and s.get("veredicto") in VEREDICTOS_VALIDOS)
 
 
+def _cruces_directos(v_prim, ts, tend4h, tend_btc):
+    """Señales de cruce con la función REAL de senales (_cruce_ema_rsi), sin pasar
+    por evaluar() (que además calcula niveles, ADX y volumen para los otros
+    tipos de señal que el backtest no usa). El cruce solo evalúa RSI, EMA200,
+    tendencia 4H y BTC; el resto de campos que _armar copia a la señal son
+    metadatos de pantalla que el backtest no lee, así que van con valores
+    neutros. El resultado es idéntico al cruce que devolvería evaluar()."""
+    cierres = [v[4] for v in v_prim]
+    c = cierres[-1]
+    arr = np.asarray(cierres, dtype=float)
+    m = {"c": float(c), "rsi": float(ind.rsi(arr, 14)),
+         "ema200": float(ind.ultima_ema(arr, 200)),
+         "atr": 1.0, "ema20": float(c), "ema50": float(c), "res": float(c), "sop": float(c),
+         "adx": 0.0, "vol_rel": 0.0, "ts": int(ts)}
+    out = []
+    for direccion in ("LONG", "SHORT"):
+        try:
+            s = senales._cruce_ema_rsi(cierres, m, direccion, tend4h, tend_btc)
+        except Exception:
+            s = None
+        if s is not None and _es_cruce_valido(s):
+            out.append(s)
+    return out
+
+
+def _candidato_cruce(i, e9, e21, precio):
+    """¿Vale la pena evaluar esta vela? Solo si las EMA 9/21 cruzaron entre las
+    últimas 3 velas o están muy pegadas (≤0,2% del precio). La EMA de la ventana
+    de 300 velas que usa evaluar() converge con la de la serie completa tras
+    cientos de velas, así que este filtro es un superconjunto seguro: nunca
+    deja fuera una vela donde evaluar() encontraría un cruce, pero evita
+    evaluar las miles de velas donde es imposible (eso era lo que tardaba)."""
+    for k in (i, i - 1, i - 2):
+        if k < 1:
+            continue
+        a9, a21, b9, b21 = e9[k], e21[k], e9[k - 1], e21[k - 1]
+        if np.isnan(a9) or np.isnan(a21) or np.isnan(b9) or np.isnan(b21):
+            continue
+        if (b9 <= b21 and a9 > a21) or (b9 >= b21 and a9 < a21):
+            return True
+        if abs(a9 - a21) <= 0.002 * precio:
+            return True
+    return False
+
+
 def ejecutar(ex, coin, dias=60, timeframe="15m", sin_filtro_btc=()):
     """Corre el backtest de una moneda. Devuelve un dict con métricas y operaciones."""
     ms = f"{coin}/USDT:USDT"
@@ -74,12 +123,51 @@ def ejecutar(ex, coin, dias=60, timeframe="15m", sin_filtro_btc=()):
         return {"coin": coin, "error": f"Datos insuficientes: solo {len(prim)} velas {timeframe}"}
     ts4h = [v[0] for v in ctx4h]
     tsbtc = [v[0] for v in btc1h] if btc1h else []
+    # EMAs de la serie completa (una sola vez): pre-filtro barato. Antes se
+    # llamaba a senales.evaluar en CADA vela y eso tardaba minutos; ahora solo
+    # se evalúan las velas donde pudo haber un cruce.
+    cierres = np.asarray([v[4] for v in prim], dtype=float)
+    e9_full = ind.ema(cierres, 9)
+    e21_full = ind.ema(cierres, 21)
 
     trades = []
     pos = None  # {dir, entrada, sl, tp, sl_pct, ts_entrada}
+
+    def _cerrar(salida, motivo):
+        nonlocal pos
+        entrada = pos["entrada"]
+        if pos["dir"] == "LONG":
+            r = ((salida - entrada) / entrada * 100) / pos["sl_pct"]
+        else:
+            r = ((entrada - salida) / entrada * 100) / pos["sl_pct"]
+        trades.append({"ts_entrada": pos["ts"], "dir": pos["dir"], "entrada": entrada,
+                       "salida": salida, "motivo": motivo, "r": round(r, 2)})
+        pos = None
+
     for i in range(VENTANA, len(prim)):
         vela = prim[i]
         ts = vela[0]
+        if pos is not None:
+            # Salida por stop/meta: no necesita evaluar nada
+            alto, bajo = vela[2], vela[3]
+            if pos["dir"] == "LONG":
+                if bajo <= pos["sl"]:
+                    _cerrar(pos["sl"], "STOP")
+                    continue
+                if alto >= pos["tp"]:
+                    _cerrar(pos["tp"], "META")
+                    continue
+            else:
+                if alto >= pos["sl"]:
+                    _cerrar(pos["sl"], "STOP")
+                    continue
+                if bajo <= pos["tp"]:
+                    _cerrar(pos["tp"], "META")
+                    continue
+            if not _candidato_cruce(i, e9_full, e21_full, vela[4]):
+                continue
+        elif not _candidato_cruce(i, e9_full, e21_full, vela[4]):
+            continue
         v_prim = prim[max(0, i - VENTANA + 1):i + 1]
         k4 = bisect_right(ts4h, ts)
         v4h = ctx4h[max(0, k4 - VENTANA_CTX):k4] if k4 else None
@@ -87,11 +175,9 @@ def ejecutar(ex, coin, dias=60, timeframe="15m", sin_filtro_btc=()):
         if btc1h:
             kb = bisect_right(tsbtc, ts)
             vbtc = btc1h[max(0, kb - VENTANA_CTX):kb] if kb else None
-        try:
-            señales = senales.evaluar(coin, v_prim, v4h, vbtc)
-        except Exception:
-            continue
-        cruces = [s for s in señales if _es_cruce_valido(s)]
+        tend4h = senales.tendencia([x[4] for x in v4h]) if v4h else "NEUTRAL"
+        tend_btc = senales.tendencia([x[4] for x in vbtc]) if vbtc else None
+        cruces = _cruces_directos(v_prim, ts, tend4h, tend_btc)
         if pos is None:
             if not cruces:
                 continue
@@ -108,33 +194,9 @@ def ejecutar(ex, coin, dias=60, timeframe="15m", sin_filtro_btc=()):
             pos = {"dir": direccion, "entrada": entrada, "sl": sl, "tp": tp,
                    "sl_pct": sl_pct, "ts": ts, "subtipo": s["subtipo"]}
             continue
-        # Hay posición abierta: revisar salida en esta vela (posterior a la de entrada)
-        alto, bajo = vela[2], vela[3]
-        salida, motivo = None, None
-        if pos["dir"] == "LONG":
-            if bajo <= pos["sl"]:
-                salida, motivo = pos["sl"], "STOP"
-            elif alto >= pos["tp"]:
-                salida, motivo = pos["tp"], "META"
-        else:
-            if alto >= pos["sl"]:
-                salida, motivo = pos["sl"], "STOP"
-            elif bajo <= pos["tp"]:
-                salida, motivo = pos["tp"], "META"
-        if salida is None:
-            contrario = "VENTA" if pos["dir"] == "LONG" else "COMPRA"
-            if any(s["tipo"] == contrario for s in cruces):
-                salida, motivo = vela[4], "CRUCE CONTRARIO"
-        if salida is None:
-            continue
-        entrada = pos["entrada"]
-        if pos["dir"] == "LONG":
-            r = ((salida - entrada) / entrada * 100) / pos["sl_pct"]
-        else:
-            r = ((entrada - salida) / entrada * 100) / pos["sl_pct"]
-        trades.append({"ts_entrada": pos["ts"], "dir": pos["dir"], "entrada": entrada,
-                       "salida": salida, "motivo": motivo, "r": round(r, 2)})
-        pos = None
+        contrario = "VENTA" if pos["dir"] == "LONG" else "COMPRA"
+        if any(s["tipo"] == contrario for s in cruces):
+            _cerrar(vela[4], "CRUCE CONTRARIO")
     if pos is not None:
         # Operación abierta al final de los datos: se cierra al último cierre
         entrada = pos["entrada"]
