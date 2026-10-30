@@ -117,28 +117,44 @@ MONEDAS_TRADING = ["BTC", "ETH", "ZEC", "PAXG", "UKOIL"]  # Señales y alertas: 
 MONEDAS_OPERABLES = ["ETH", "ZEC", "PAXG", "UKOIL"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
 SIN_FILTRO_BTC = ["PAXG", "UKOIL"]  # Oro y Brent: SIN filtro BTC y SIN avisos de "BTC manda" (muchas veces se mueven al revés de BTC)
 
-# --- Red pública de noticias: el bot lee noticias cripto y avisa, NUNCA pausa señales ---
-# Fuentes RSS públicas, sin claves. Si una noticia importante y reciente puede mover a BTC,
+# --- Red pública de noticias: el bot lee noticias y avisa, NUNCA pausa señales ---
+# Fuentes RSS públicas, sin claves. Cripto: CoinDesk y CoinTelegraph.
+# Petróleo: OilPrice (energía). Cada fuente lleva su nombre para citarla en el aviso.
+# Si una noticia importante y reciente puede mover a BTC o al petróleo,
 # se añade una advertencia a las señales y se manda un aviso. Las señales siempre se mandan.
 FUENTES_NOTICIAS = [
-    "https://www.coindesk.com/arc/outboundfeeds/rss/",
-    "https://cointelegraph.com/rss",
+    ("CoinDesk", "https://www.coindesk.com/arc/outboundfeeds/rss/"),
+    ("CoinTelegraph", "https://cointelegraph.com/rss"),
+]
+FUENTES_NOTICIAS_PETROLEO = [
+    ("OilPrice", "https://oilprice.com/rss/main"),
 ]
 PALABRAS_NOTICIA = ["fed", "fomc", "powell", "cpi", "ppi", "inflation", "interest rate",
                     "rate hike", "rate cut", "sec", "etf", "tariff", "hack", "bankrupt",
                     "liquidation", "payroll", "gdp", "recession"]
+# Solo palabras FUERTES para petróleo: "oil" solo no avisa (demasiado ruido).
+PALABRAS_NOTICIA_PETROLEO = ["opec", "opep", "hormuz", "iran", "irán", "strike", "attack",
+                            "ataque", "sanction", "sancion", "sanción", "production cut",
+                            "recorte", "inventories", "inventarios", "eia", "brent",
+                            "crude", "crudo", "saudi", "refinery", "refinería",
+                            "guerra", "embargo", "output cut"]
 VENTANA_NOTICIA_MIN = 120
+MAX_AVISOS_NOTICIAS_DIA = 5
 _cache_noticias = {"ts": 0.0, "titulares": []}
 _vistas_noticias = None
+_contador_noticias = {"dia": None, "n": 0}
 
 def _leer_noticias():
-    """Titulares recientes (<= VENTANA_NOTICIA_MIN) que pueden mover a BTC. Cache 10 min.
+    """Titulares recientes (<= VENTANA_NOTICIA_MIN) que pueden mover a BTC o al petróleo.
+    Devuelve lista de (titulo, activo, fuente). Cache 10 min.
     Si las fuentes fallan, devuelve lo último en cache (o vacío): nunca rompe las señales."""
     ahora = time.time()
     if ahora - _cache_noticias["ts"] < 600:
         return _cache_noticias["titulares"]
     titulares = []
-    for url in FUENTES_NOTICIAS:
+    fuentes = ([(f, u, PALABRAS_NOTICIA, "BTC") for f, u in FUENTES_NOTICIAS] +
+               [(f, u, PALABRAS_NOTICIA_PETROLEO, "PETRÓLEO") for f, u in FUENTES_NOTICIAS_PETROLEO])
+    for fuente, url, palabras, activo in fuentes:
         try:
             r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
             raiz = ET.fromstring(r.content)
@@ -158,32 +174,63 @@ def _leer_noticias():
                 edad_min = (datetime.now(timezone.utc) - pub.astimezone(timezone.utc)).total_seconds() / 60.0
                 if 0 <= edad_min <= VENTANA_NOTICIA_MIN:
                     bajo = titulo.lower()
-                    if any(p in bajo for p in PALABRAS_NOTICIA):
-                        titulares.append(titulo)
+                    if any(p in bajo for p in palabras):
+                        titulares.append((titulo, activo, fuente))
         except Exception as e:
             print(f"No pude leer noticias de {url}: {e}")
+    _unicos = []
+    _vistos = set()
+    for _t in titulares:
+        if _t[0] not in _vistos:
+            _vistos.add(_t[0])
+            _unicos.append(_t)
+    titulares = _unicos
     _cache_noticias["ts"] = ahora
     _cache_noticias["titulares"] = titulares
     return titulares
 
-def contexto_noticias():
-    """Primer titular importante reciente, o None."""
+def contexto_noticias(preferido=None):
+    """Primer titular importante reciente, o None.
+    Si se pide un activo (p. ej. "PETRÓLEO"), prefiere ese; si no hay, usa el primero."""
     t = _leer_noticias()
-    return t[0] if t else None
+    if preferido:
+        for titulo, activo, _fuente in t:
+            if activo == preferido:
+                return titulo
+    return t[0][0] if t else None
 
 def avisar_noticias_nuevas():
-    """Avisa una sola vez por titular nuevo importante. La primera lectura solo marca, no avisa."""
+    """Avisa una sola vez por titular nuevo importante, con tope diario.
+    La primera lectura solo marca, no avisa. Lo que pasa del tope queda en /mercado."""
     global _vistas_noticias
-    actuales = set(_leer_noticias())
+    actuales = _leer_noticias()
+    titulos_actuales = {t[0] for t in actuales}
     if _vistas_noticias is None:
-        _vistas_noticias = actuales
+        _vistas_noticias = titulos_actuales
         return
-    nuevas = [t for t in actuales if t not in _vistas_noticias]
-    _vistas_noticias = actuales
+    nuevas = [t for t in actuales if t[0] not in _vistas_noticias]
+    _vistas_noticias = titulos_actuales
+    # Un mismo titular en dos fuentes (p. ej. CoinDesk y CoinTelegraph) avisa una sola vez
+    _titulos_vistos = set()
+    _unicas = []
+    for _t in nuevas:
+        if _t[0] not in _titulos_vistos:
+            _titulos_vistos.add(_t[0])
+            _unicas.append(_t)
+    nuevas = _unicas
     if len(_vistas_noticias) > 100:
         _vistas_noticias = set(list(_vistas_noticias)[-50:])
-    for t in nuevas[:3]:
-        avisar(f"📰 Noticia importante para BTC:\n{t}\nEl bot sigue mandando señales; opera con cuidado.")
+    hoy = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    if _contador_noticias["dia"] != hoy:
+        _contador_noticias["dia"] = hoy
+        _contador_noticias["n"] = 0
+    for titulo, activo, fuente in nuevas[:3]:
+        if _contador_noticias["n"] >= MAX_AVISOS_NOTICIAS_DIA:
+            break
+        _contador_noticias["n"] += 1
+        etiqueta = "el PETRÓLEO (Brent)" if activo == "PETRÓLEO" else "BTC"
+        avisar(f"📰 Noticia importante para {etiqueta}:\n{titulo}\nFuente: {fuente}\nEl bot sigue mandando señales; opera con cuidado.")
+
 MONEDAS_REPORTE = ["BTC", "ETH", "ZEC", "PAXG", "UKOIL"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
@@ -501,7 +548,7 @@ def bucle_trading_automatico():
                                 markup = teclado_entrada(coin, senal['tipo'])
                             lider = None if coin in SIN_FILTRO_BTC else (lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None)
                             texto = "🚨 SEÑAL 1H 🚨\n\n" + avisos.texto_alerta(coin, senal, lider)
-                            ctx = contexto_noticias()
+                            ctx = contexto_noticias("PETRÓLEO" if coin == "UKOIL" else None)
                             if ctx:
                                 texto += f"\n\n📰 Noticia que puede mover {'al mercado' if coin in SIN_FILTRO_BTC else 'a BTC'}: {ctx}"
                             if hay_posicion:
@@ -606,7 +653,7 @@ def revisar_zonas(ex):
                 texto = avisos.encabezado(s) + "\n\n"
                 lider = None if coin in SIN_FILTRO_BTC else (lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None)
                 texto += avisos.texto_alerta(coin, s, lider)
-                ctx = contexto_noticias()
+                ctx = contexto_noticias("PETRÓLEO" if coin == "UKOIL" else None)
                 if ctx:
                     texto += f"\n\n📰 Noticia que puede mover {'al mercado' if coin in SIN_FILTRO_BTC else 'a BTC'}: {ctx}"
                 if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar
@@ -1915,7 +1962,7 @@ def cmd_mercado(message):
             lineas.append(f"• {coin}: no pude leer el mercado ({e})")
     ctx = contexto_noticias()
     if ctx:
-        lineas.append(f"📰 Noticia reciente que puede mover a BTC: {ctx}")
+        lineas.append(f"📰 Noticia reciente que puede mover al mercado: {ctx}")
     lineas += ["", "Un 'PUNTO DE ENTRADA' llega solo con botones; esto es para mirar cuando quieras."]
     bot.send_message(message.chat.id, "\n".join(lineas))
 
