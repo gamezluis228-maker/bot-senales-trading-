@@ -139,7 +139,9 @@ PALABRAS_NOTICIA_PETROLEO = ["opec", "opep", "hormuz", "iran", "irán", "strike"
                             "crude", "crudo", "saudi", "refinery", "refinería",
                             "guerra", "embargo", "output cut"]
 VENTANA_NOTICIA_MIN = 120
-MAX_AVISOS_NOTICIAS_DIA = 5
+# BTC SIN tope: Luis necesita estar atento a todo lo que mueva a BTC.
+# Petróleo SÍ tiene tope (OilPrice publica mucho ruido): 5 avisos/día.
+MAX_AVISOS_NOTICIAS_PETROLEO_DIA = 5
 _cache_noticias = {"ts": 0.0, "titulares": []}
 _vistas_noticias = None
 _contador_noticias = {"dia": None, "n": 0}
@@ -200,8 +202,9 @@ def contexto_noticias(preferido=None):
     return t[0][0] if t else None
 
 def avisar_noticias_nuevas():
-    """Avisa una sola vez por titular nuevo importante, con tope diario.
-    La primera lectura solo marca, no avisa. Lo que pasa del tope queda en /mercado."""
+    """Avisa una sola vez por titular nuevo importante.
+    BTC SIN tope (Luis necesita estar atento). Petróleo con tope 5/día;
+    lo que pasa del tope queda en /mercado. La primera lectura solo marca, no avisa."""
     global _vistas_noticias
     actuales = _leer_noticias()
     titulos_actuales = {t[0] for t in actuales}
@@ -224,10 +227,11 @@ def avisar_noticias_nuevas():
     if _contador_noticias["dia"] != hoy:
         _contador_noticias["dia"] = hoy
         _contador_noticias["n"] = 0
-    for titulo, activo, fuente in nuevas[:3]:
-        if _contador_noticias["n"] >= MAX_AVISOS_NOTICIAS_DIA:
-            break
-        _contador_noticias["n"] += 1
+    for titulo, activo, fuente in nuevas:
+        if activo == "PETRÓLEO":
+            if _contador_noticias["n"] >= MAX_AVISOS_NOTICIAS_PETROLEO_DIA:
+                continue
+            _contador_noticias["n"] += 1
         etiqueta = "el PETRÓLEO (Brent)" if activo == "PETRÓLEO" else "BTC"
         avisar(f"📰 Noticia importante para {etiqueta}:\n{titulo}\nFuente: {fuente}\nEl bot sigue mandando señales; opera con cuidado.")
 
