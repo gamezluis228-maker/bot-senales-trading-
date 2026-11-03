@@ -16,7 +16,7 @@ GANANCIA_MIN_EMA_PCT = 0.5      # el cruce de EMAs solo cuenta si ya vas ganando
 GANANCIA_MIN_RSI_PCT = 1.0      # el agotamiento del RSI solo cuenta si ya vas ganando 1 %
 RSI_AGOTADO_LONG = 75
 RSI_AGOTADO_SHORT = 25
-EXTRA_STOP_DURO_PCT = 0.5       # el stop de emergencia (en MEXC) queda 0.5 % más lejos que el stop normal
+EXTRA_STOP_DURO_PCT = 0.5       # el stop de emergencia (en el exchange) queda 0.5 % más lejos que el stop normal
 CONSULTA_ESPERA_SEG = 180       # tiempo que el bot espera tu respuesta cuando el precio toca el stop
 SEPARACION_MIN_ASEGURAR_PCT = 0.1   # el precio debe estar 0.1 % más allá del nuevo stop
 
@@ -31,6 +31,14 @@ def fmt_precio(x):
 
 def coin_de_simbolo(simbolo):
     return (simbolo or "").split("/")[0]
+
+
+ETIQUETAS_MONEDA = {"BZ": "Brent (BZUSDT)", "CL": "WTI (CLUSDT)"}
+
+
+def etiqueta_moneda(coin):
+    """Nombre visible: Brent/WTI con su símbolo Bybit; las demás, tal cual."""
+    return ETIQUETAS_MONEDA.get(coin, coin)
 
 
 def lado_orden(lado_posicion):
@@ -55,7 +63,7 @@ def parsear_posicion(p):
         "apalancamiento": float(p.get("leverage") or 0),
         "margen": float(p.get("initialMargin") or p.get("collateral") or 0),
         "open_type": {"isolated": 1, "cross": 2}.get(p.get("marginMode")),   # None si no se sabe
-        "position_id": info.get("positionId"),
+        "position_id": None,  # Bybit no tiene positionId; en one-way se usa positionIdx 0 (el cierre ya no usa id)
         "liquidacion": float(liq) if liq else None,
     }
 
@@ -130,7 +138,7 @@ def texto_posicion(coin, pos, precio, margen, apalancamiento, liquidacion=None, 
     largo = pos["lado"] == "buy"
     v = variacion(pos["lado"], pos["entrada"], precio, margen, apalancamiento)
     signo = "🟢" if v["pnl_usdt"] >= 0 else "🔴"
-    L = [f"{'📈' if largo else '📉'} {coin} {'LONG 🟢' if largo else 'SHORT 🔴'} | {apalancamiento:g}x | margen ${margen:.2f}",
+    L = [f"{'📈' if largo else '📉'} {etiqueta_moneda(coin)} {'LONG 🟢' if largo else 'SHORT 🔴'} | {apalancamiento:g}x | margen ${margen:.2f}",
          f"💵 Entrada: ${fmt_precio(pos['entrada'])} | Precio ahora: ${fmt_precio(precio)}",
          f"{signo} Variación: {v['pct_precio']:+.2f}% del precio = {v['pct_margen']:+.1f}% de tu margen (≈ ${v['pnl_usdt']:+.2f}, antes de comisiones)"]
     if gestionada:
@@ -142,7 +150,7 @@ def texto_posicion(coin, pos, precio, margen, apalancamiento, liquidacion=None, 
             dist = abs(precio - pos["sl"]) / precio * 100
             L.append(f"🛑 Stop del bot: ${fmt_precio(pos['sl'])} ({'ganancia protegida ✅' if protegido else 'protege contra pérdida'}; a {dist:.2f}% del precio)")
             if pos.get("adoptada"):
-                L.append("ℹ️ Ese stop lo vigila el bot, no está puesto en MEXC: si el bot se cae, no actúa.")
+                L.append("ℹ️ Ese stop lo vigila el bot, no está puesto en Bybit: si el bot se cae, no actúa.")
     else:
         L.append("⚪ El bot NO la está gestionando todavía.")
     if liquidacion:
@@ -211,13 +219,13 @@ def diagnostico_stop(lado, r):
     return {"recomendacion": rec, "contra": mal, "respiro": bien, "score": score}
 
 
-def texto_consulta(coin, pos, precio, diag, sl_duro, motivo, gestion_en_mexc=True):
+def texto_consulta(coin, pos, precio, diag, sl_duro, motivo, gestion_en_bybit=True):
     """Mensaje que se envía cuando el precio toca el stop: análisis y recomendación. No se ha cerrado nada."""
     rec = diag["recomendacion"]
     consejo = {"CERRAR": "💡 Recomiendo CERRAR: el mercado parece ir en serio en contra.",
                "MANTENER": "💡 Recomiendo MANTENER: parece un respiro, no un cambio de tendencia.",
                "DUDA": "💡 Sin señal clara: con 20x lo prudente es CERRAR para proteger tu capital."}[rec]
-    L = [f"⚠️ {coin}: el precio tocó tu stop ({motivo}) en ${fmt_precio(pos['sl'])}.",
+    L = [f"⚠️ {etiqueta_moneda(coin)}: el precio tocó tu stop ({motivo}) en ${fmt_precio(pos['sl'])}.",
          "NO he cerrado nada: decide tú.", ""]
     L.append(texto_posicion(coin, pos, precio, pos["margen"], pos["apalancamiento"], pos.get("liquidacion")))
     L.append("")
@@ -228,7 +236,7 @@ def texto_consulta(coin, pos, precio, diag, sl_duro, motivo, gestion_en_mexc=Tru
         L.append("🟢 A favor del respiro: " + ("; ".join(diag["respiro"]) if diag["respiro"] else "nada relevante"))
     L += ["", consejo, "(Es una estimación, no una garantía.)", "",
           f"🛑 Si pulsas Mantener, el stop de emergencia queda en ${fmt_precio(sl_duro)}"
-          + (" (también puesto en MEXC)." if gestion_en_mexc else "."),
+          + (" (también puesto en Bybit)." if gestion_en_bybit else "."),
           f"⏱️ Si no respondes en {CONSULTA_ESPERA_SEG // 60} min NO cierro nada: mantengo hasta el stop de emergencia "
           "(ese es tu límite de pérdida)."]
     return "\n".join(L)
@@ -240,7 +248,7 @@ def linea_activa(p, precio):
     lev = p["apalancamiento"] or 1
     v = variacion(lado, p["entrada"], precio, p["margen"], lev)
     signo = "🟢" if v["pnl_usdt"] >= 0 else "🔴"
-    return (f"{signo} {p['coin']} {'LONG' if lado == 'buy' else 'SHORT'} {lev:g}x · entrada ${fmt_precio(p['entrada'])} "
+    return (f"{signo} {etiqueta_moneda(p['coin'])} {'LONG' if lado == 'buy' else 'SHORT'} {lev:g}x · entrada ${fmt_precio(p['entrada'])} "
             f"· ahora ${fmt_precio(precio)} · {v['pct_margen']:+.1f}% del margen (≈ ${v['pnl_usdt']:+.2f})")
 
 
@@ -248,8 +256,8 @@ def texto_activas(lineas):
     """Encabezado con el conteo de operaciones activas + una línea por operación."""
     n = len(lineas)
     if n == 0:
-        return "📭 Operaciones activas en MEXC Futuros: 0"
-    return f"📌 Operaciones activas en MEXC Futuros: {n}\n" + "\n".join(f"• {x}" for x in lineas)
+        return "📭 Operaciones activas en Bybit Futuros: 0"
+    return f"📌 Operaciones activas en Bybit Futuros: {n}\n" + "\n".join(f"• {x}" for x in lineas)
 
 
 def texto_analisis(diag):

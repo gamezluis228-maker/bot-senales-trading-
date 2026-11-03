@@ -1,4 +1,4 @@
-"""Backtest de la estrategia REAL del bot sobre velas cerradas de MEXC.
+"""Backtest de la estrategia REAL del bot sobre velas cerradas de Bybit.
 
 No es una copia de la estrategia: llama a senales._cruce_ema_rsi, la misma
 función que usa el bot en vivo dentro de evaluar(), vela por vela, sin mirar
@@ -33,7 +33,7 @@ VEREDICTOS_VALIDOS = ("VERDADERO", "PROBABLE")
 
 
 def fetch_serie(ex, market_symbol, timeframe, dias):
-    """Velas CERRADAS de MEXC, paginando (límite 1000 por llamada)."""
+    """Velas CERRADAS de Bybit, paginando (límite 1000 por llamada)."""
     tf_ms = TF_MS[timeframe]
     ahora = int(time.time() * 1000)
     desde = ahora - int(dias * 86400 * 1000)
@@ -125,9 +125,9 @@ def ejecutar(ex, coin, dias=60, timeframe="15m", sin_filtro_btc=()):
         if coin != "BTC" and coin not in sin_filtro_btc:
             btc1h = fetch_serie(ex, "BTC/USDT:USDT", "1h", dias)
     except Exception as e:
-        return {"coin": coin, "error": f"No pude leer velas de MEXC: {e}"}
+        return {"coin": coin, "error": f"No pude leer velas de Bybit: {e}"}
     if len(prim) < VENTANA + 50:
-        return {"coin": coin, "error": f"Datos insuficientes: solo {len(prim)} velas {timeframe}"}
+        return {"coin": coin, "error": f"Pocos datos: solo {len(prim)} velas {timeframe} (la historia TradFi de Bybit puede ser corta; no es un fallo del backtest)"}
     ts4h = [v[0] for v in ctx4h]
     tsbtc = [v[0] for v in btc1h] if btc1h else []
     # EMAs de la serie completa (una sola vez): pre-filtro barato. Antes se

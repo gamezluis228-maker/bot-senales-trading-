@@ -372,7 +372,8 @@ def evaluar(simbolo, v1h, v4h=None, vbtc=None):
 # ----------------------------------------------------------------------------
 def dimensionar_contratos(margen_usdt, apalancamiento, precio, tamano_contrato,
                           min_contratos=1.0, tope_margen=5.0):
-    """Convierte margen x apalancamiento en contratos (MEXC opera en contratos, no en monedas).
+    """Convierte margen x apalancamiento en cantidad (en Bybit la cantidad es moneda base:
+    barriles, onzas o monedas; el nombre "contratos" se conserva por compatibilidad).
     Devuelve (contratos, mensaje_error). Si el margen no alcanza para el mínimo de 1 contrato,
     se permite subirlo hasta 1.5x del margen pedido (y nunca más que el tope)."""
     if precio <= 0 or tamano_contrato <= 0 or apalancamiento <= 0:
@@ -384,7 +385,7 @@ def dimensionar_contratos(margen_usdt, apalancamiento, precio, tamano_contrato,
     if margen_necesario <= min(tope_margen, margen_usdt * 1.5):
         return float(min_contratos), None
     return 0.0, (f"Con ${margen_usdt:.2f} a {apalancamiento}x no alcanza para el mínimo de "
-                 f"{min_contratos:g} contrato (necesitas ≈ ${margen_necesario:.2f} de margen).")
+                 f"{min_contratos:g} de cantidad mínima (necesitas ≈ ${margen_necesario:.2f} de margen).")
 
 
 def pnl_estimado(lado, entrada, salida, margen, apalancamiento):

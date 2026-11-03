@@ -60,8 +60,8 @@ MONTO_MINIMO_USDT = 5.0  # mínimo del tamaño total de la posición (margen x a
 APALANCAMIENTO_AUTO = 20          # apalancamiento de las señales automáticas
 MONTOS_PERMITIDOS = [1.0, 2.0, 3.0]  # botones de margen en USDT
 MARGEN_MAXIMO_USDT = float(os.getenv("MARGEN_MAXIMO_USDT", "5"))  # tope de seguridad por operación
-# 1 = margen aislado (lo máximo que pierdes es el margen de la operación), 2 = cruzado.
-TIPO_MARGEN_MEXC = int(os.getenv("MEXC_OPEN_TYPE", "1"))
+# Margen aislado: lo máximo que pierdes es el margen de la operación.
+# Bybit: margen aislado siempre; se fija por símbolo con set_margin_mode (sin variable de entorno).
 # A 20x la liquidación ocurre cerca de -5%, por eso el SL nunca puede ser de 4%.
 SL_PORCENTAJE = 1.5               # SL por defecto (operaciones manuales o sin señal vigente)
 SENAL_VIGENCIA_SEG = 5400         # una señal se puede operar con los botones durante 90 min
@@ -69,7 +69,7 @@ SENAL_MAX_DESVIO_PCT = 0.8        # si el precio se movió más que esto desde l
 INTERVALO_AVISOS_SEG = 120         # el bot busca oportunidades y niveles vigilados cada 2 min
 lider_btc = {'tipo': None, 'ts': 0.0}   # última señal de BTC (el líder): COMPRA / VENTA
 INTERVALO_GESTION_SEG = 20        # cada cuánto el bot revisa el precio de tus posiciones
-GRACIA_POSICION_SEG = 90          # tiempo para que MEXC muestre una posición recién abierta
+GRACIA_POSICION_SEG = 90          # tiempo para que Bybit muestre una posición recién abierta (se mantiene como margen de seguridad)
 INTERVALO_DETECCION_SEG = 60      # cada cuánto busca posiciones abiertas que el bot no gestiona (p. ej. las tuyas)
 INTERVALO_EVAL_SALIDA_SEG = 300   # cada cuánto evalúa si conviene sugerirte salir de una posición
 
@@ -113,9 +113,12 @@ avisos_hoy = {'fecha': '', 'n': 0}  # contador diario de avisos de entrada (anti
 ultima_zona = {}                  # (moneda, tipo) -> hora del último aviso de zona
 senales_enviadas = {}             # (moneda, subtipo) -> vela ya notificada (evita repetidas)
 
-MONEDAS_TRADING = ["BTC", "ETH", "ZEC", "PAXG", "UKOIL"]  # Señales y alertas: BTC + operables (PAXG = oro, UKOIL = Brent)
-MONEDAS_OPERABLES = ["ETH", "ZEC", "PAXG", "UKOIL"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
-SIN_FILTRO_BTC = ["PAXG", "UKOIL"]  # Oro y Brent: SIN filtro BTC y SIN avisos de "BTC manda" (muchas veces se mueven al revés de BTC)
+MONEDAS_TRADING = ["BTC", "ETH", "ZEC", "PAXG", "BZ", "CL"]  # Señales y alertas: BTC + operables (PAXG = oro tokenizado, BZ = Brent, CL = WTI)
+MONEDAS_OPERABLES = ["ETH", "ZEC", "PAXG", "BZ", "CL"]   # Solo estas se pueden OPERAR; BTC da señales y alertas pero no se opera
+SIN_FILTRO_BTC = ["PAXG", "BZ", "CL"]  # Oro, Brent y WTI: SIN filtro BTC y SIN avisos de "BTC manda" (muchas veces se mueven al revés de BTC)
+# Etiquetas visibles (ver posiciones.etiqueta_moneda): BZ = Brent (BZUSDT), CL = WTI (CLUSDT).
+# Bybit: la cuenta debe estar en modo one-way + margen aislado (se verifica en la app;
+# el bot usa positionIdx 0 en todas las órdenes). El bot NO cambia el modo solo.
 
 # --- Red pública de noticias: el bot lee noticias y avisa, NUNCA pausa señales ---
 # Fuentes RSS públicas, sin claves. Cripto: CoinDesk y CoinTelegraph.
@@ -232,10 +235,10 @@ def avisar_noticias_nuevas():
             if _contador_noticias["n"] >= MAX_AVISOS_NOTICIAS_PETROLEO_DIA:
                 continue
             _contador_noticias["n"] += 1
-        etiqueta = "el PETRÓLEO (Brent)" if activo == "PETRÓLEO" else "BTC"
+        etiqueta = "el PETRÓLEO (Brent y WTI)" if activo == "PETRÓLEO" else "BTC"
         avisar(f"📰 Noticia importante para {etiqueta}:\n{titulo}\nFuente: {fuente}\nEl bot sigue mandando señales; opera con cuidado.")
 
-MONEDAS_REPORTE = ["BTC", "ETH", "ZEC", "PAXG", "UKOIL"]
+MONEDAS_REPORTE = ["BTC", "ETH", "ZEC", "PAXG", "BZ", "CL"]
 MONEDAS_PREDICCION = ["BTC", "ETH", "ZEC", "SOL"]
 
 
@@ -253,6 +256,7 @@ def es_dueno(obj):
         return False
 
 
+# Se conserva sin uso en esta rama (corte/rollback); la rama bybit usa obtener_credenciales_bybit().
 def obtener_credenciales_mexc():
     api = (os.getenv("MEXC_API_KEY") or os.getenv("MEXC_KEY") or 
            os.getenv("MEXC_API") or "")
@@ -260,24 +264,32 @@ def obtener_credenciales_mexc():
               os.getenv("MEXC_SEC") or "")
     return api.strip(), secret.strip()
 
+
+def obtener_credenciales_bybit():
+    """Llave de Bybit: lee EXACTAMENTE BYBIT_API_KEY y BYBIT_SECRET_KEY (sin fallbacks).
+    Los valores los pone el usuario en Render; aquí solo van los nombres."""
+    return os.getenv("BYBIT_API_KEY", "").strip(), os.getenv("BYBIT_SECRET_KEY", "").strip()
+
 _hilo_local = threading.local()
 
 def crear_instancia_exchange(mercado='swap'):
-    """Una instancia de ccxt por hilo y por mercado (evita recargar los mercados en cada llamada)."""
+    """Una instancia ccxt-bybit por hilo (evita recargar los mercados en cada llamada)."""
     cache = getattr(_hilo_local, "instancias", None)
     if cache is None:
         cache = _hilo_local.instancias = {}
     if mercado not in cache:
-        api, secret = obtener_credenciales_mexc()
+        api, secret = obtener_credenciales_bybit()
         config = {
             'enableRateLimit': True,
-            'options': {'defaultType': mercado, 'createMarketBuyOrderRequiresPrice': False}
+            # Bybit UTA: una sola billetera; siempre 'swap' (linear). El argumento
+            # 'mercado' se conserva por compatibilidad pero ya no distingue spot.
+            'options': {'defaultType': 'swap', 'createMarketBuyOrderRequiresPrice': False}
         }
         if api:
             config['apiKey'] = api
         if secret:
             config['secret'] = secret
-        cache[mercado] = ccxt.mexc(config)
+        cache[mercado] = ccxt.bybit(config)
     return cache[mercado]
 
 exchange_default = crear_instancia_exchange('swap')
@@ -285,13 +297,13 @@ exchange_default = crear_instancia_exchange('swap')
 def inicializar_mercados():
     try:
         exchange_default.load_markets()
-        print("¡Mercados de MEXC cargados correctamente!")
+        print("¡Mercados de Bybit cargados correctamente!")
     except Exception as e:
         print(f"Error al cargar mercados: {e}")
 
 @app.route('/')
 def home():
-    return "Bot Activo - MEXC Conectados"
+    return "Bot Activo - Bybit Conectado"
 
 def bucle_keep_alive():
     # Solo mantiene despierto al bot: pega a la URL PUBLICA de Render cada 5 min.
@@ -375,7 +387,7 @@ def registrar_operacion(coin, tipo_orden, lado, precio_entrada, margen, apalanca
     except Exception as e:
         print(f"Error al registrar operación: {e}")
 
-def obtener_analisis_mexc(symbol, mercado='swap'):
+def obtener_analisis_bybit(symbol, mercado='swap'):
     try:
         ex = crear_instancia_exchange(mercado)
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
@@ -435,10 +447,10 @@ def detectar_rompimiento(symbol, mercado='swap'):
         print(f"Error detectando rompimiento en {symbol}: {e}")
         return []
 def obtener_analisis_con_reintentos(symbol, mercado='swap', intentos=3, espera=3):
-    """MEXC a veces responde 503 ('service not available'). Reintenta antes de rendirse."""
+    """Bybit a veces responde 5xx o retCode 10006 (límite de tasa). Reintenta antes de rendirse."""
     a = None
     for _ in range(intentos):
-        a = obtener_analisis_mexc(symbol, mercado)
+        a = obtener_analisis_bybit(symbol, mercado)
         if a.get('estado') != "FALLA EN EXCHANGE":
             return a
         time.sleep(espera)
@@ -448,7 +460,7 @@ def construir_reporte(titulo, coin, a, t4h, sentimiento):
     """Mismo formato de siempre, con las EMAs agregadas debajo de las tendencias."""
     return (
         f"{titulo}\n"
-        f"⚡ Activo MEXC: {coin}/USDT\n\n"
+        f"⚡ Activo Bybit: {coin}/USDT\n\n"
         f"💵 Precio Actual: ${a['precio']}\n\n"
         f"📊 MACRO (1H): {a['tendencia_1h']} | ADX: {a['adx_1h']} | RSI: {a['rsi_1h']}\n"
         f"📈 MACRO (4H): {t4h['tendencia']} | ADX: {t4h['adx']} | RSI: {t4h['rsi']}\n"
@@ -473,9 +485,9 @@ def bucle_reportes_automaticos():
                         ultimos_timestamps[coin] = now_ts
                         a = obtener_analisis_con_reintentos(coin, 'swap')
                         if a.get('estado') == "FALLA EN EXCHANGE":
-                            print(f"MEXC no respondió para {coin}: {a.get('pausa')}")
+                            print(f"Bybit no respondió para {coin}: {a.get('pausa')}")
                             if ULTIMO_CHAT_ID:
-                                bot.send_message(ULTIMO_CHAT_ID, f"⚠️ MEXC no respondió para {coin}/USDT (error temporal del exchange). Reintento en el próximo ciclo de 15 min.")
+                                bot.send_message(ULTIMO_CHAT_ID, f"⚠️ Bybit no respondió para {coin}/USDT (error temporal del exchange). Reintento en el próximo ciclo de 15 min.")
                             continue
                         t4h = obtener_tendencia_4h(coin, 'swap')
                         sentimiento = obtener_sentimiento_mercado()
@@ -552,7 +564,7 @@ def bucle_trading_automatico():
                                 markup = teclado_entrada(coin, senal['tipo'])
                             lider = None if coin in SIN_FILTRO_BTC else (lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None)
                             texto = "🚨 SEÑAL 1H 🚨\n\n" + avisos.texto_alerta(coin, senal, lider)
-                            ctx = contexto_noticias("PETRÓLEO" if coin == "UKOIL" else None)
+                            ctx = contexto_noticias("PETRÓLEO" if coin in ("BZ", "CL") else None)
                             if ctx:
                                 texto += f"\n\n📰 Noticia que puede mover {'al mercado' if coin in SIN_FILTRO_BTC else 'a BTC'}: {ctx}"
                             if hay_posicion:
@@ -602,7 +614,7 @@ def obtener_velas_zona(coin, ex=None):
     return v15, v1h, v4h, vbtc
 
 def _posicion_real(ex, coin):
-    """Lado ('buy'/'sell') de la posición abierta en MEXC de esa moneda (la abra quien la abra), o None."""
+    """Lado ('buy'/'sell') de la posición abierta en Bybit de esa moneda (la abra quien la abra), o None."""
     try:
         p = leer_posicion(ex, f"{coin}/USDT:USDT")
         return posiciones.lado_orden(p['lado']) if p else None
@@ -612,7 +624,7 @@ def _posicion_real(ex, coin):
 
 def _avisar_lider(ex, s):
     """BTC manda: si BTC va con fuerza en un sentido y tienes ETH/ZEC abiertas en contra, te lo dice y ofrece cerrar.
-    No aplica a PAXG ni UKOIL: el oro y el Brent muchas veces se mueven al revés de BTC."""
+    No aplica a PAXG, BZ ni CL: el oro y los petróleos muchas veces se mueven al revés de BTC."""
     lado_btc = 'buy' if s['tipo'] == 'COMPRA' else 'sell'
     for coin in MONEDAS_TRADING:
         if coin == 'BTC' or coin in SIN_FILTRO_BTC:
@@ -657,7 +669,7 @@ def revisar_zonas(ex):
                 texto = avisos.encabezado(s) + "\n\n"
                 lider = None if coin in SIN_FILTRO_BTC else (lider_btc['tipo'] if time.time() - lider_btc['ts'] < 10800 else None)
                 texto += avisos.texto_alerta(coin, s, lider)
-                ctx = contexto_noticias("PETRÓLEO" if coin == "UKOIL" else None)
+                ctx = contexto_noticias("PETRÓLEO" if coin in ("BZ", "CL") else None)
                 if ctx:
                     texto += f"\n\n📰 Noticia que puede mover {'al mercado' if coin in SIN_FILTRO_BTC else 'a BTC'}: {ctx}"
                 if lado_real:                     # señal contraria a tu posición abierta: no se abre otra, se ofrece cerrar
@@ -777,7 +789,7 @@ def avisar(texto):
         print(f"No pude enviar aviso a Telegram: {e}")
 
 def leer_posicion(ex, market_symbol):
-    """Posición abierta en MEXC para ese símbolo, o None si no hay (ver posiciones.parsear_posicion)."""
+    """Posición abierta en Bybit para ese símbolo, o None si no hay (ver posiciones.parsear_posicion)."""
     for p in ex.fetch_positions([market_symbol]) or []:
         if p.get('symbol') != market_symbol:
             continue
@@ -787,7 +799,7 @@ def leer_posicion(ex, market_symbol):
     return None
 
 def leer_todas_las_posiciones(ex):
-    """Todas las posiciones abiertas en MEXC (cualquier moneda), incluidas las que abriste a mano."""
+    """Todas las posiciones abiertas en Bybit (cualquier moneda), incluidas las que abriste a mano."""
     salida = []
     for p in ex.fetch_positions() or []:
         d = posiciones.parsear_posicion(p)
@@ -801,15 +813,15 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
         ex = crear_instancia_exchange(mercado)
         ex.load_markets()
         market_symbol = f"{symbol}/USDT:USDT" if mercado == 'swap' else f"{symbol}/USDT"
-        api, secret = obtener_credenciales_mexc()
+        api, secret = obtener_credenciales_bybit()
         if not api or not secret:
-            return False, 0, 0, 0, 0, 0, 0, "❌ **Error:** Faltan las credenciales de MEXC."
+            return False, 0, 0, 0, 0, 0, 0, "❌ **Error:** Faltan las credenciales de Bybit (BYBIT_API_KEY / BYBIT_SECRET_KEY)."
 
         _rotar_dia()
         if perdida_acumulada_dia >= LIMITE_PERDIDA_DIARIA:
             return False, 0, 0, 0, 0, 0, 0, f"🛑 **BLOQUEO POR PÉRDIDA DIARIA:** Has alcanzado el límite de ${LIMITE_PERDIDA_DIARIA} USD."
 
-        # Candados de seguridad: solo ETH/ZEC en futuros, tope de margen y una posición por moneda
+        # Candados de seguridad: solo operables en futuros, tope de margen y una posición por moneda
         if mercado != 'swap' or symbol not in MONEDAS_OPERABLES:
             return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** solo se permite operar {', '.join(MONEDAS_OPERABLES)} en Futuros."
         if margen_usdt <= 0 or margen_usdt > MARGEN_MAXIMO_USDT:
@@ -818,7 +830,7 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** ya hay una posición abierta de {symbol} gestionada por el bot."
         try:
             if leer_posicion(ex, market_symbol):
-                return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** ya tienes una posición abierta de {symbol} en MEXC; no abro otra encima."
+                return False, 0, 0, 0, 0, 0, 0, f"🔒 **Bloqueado:** ya tienes una posición abierta de {symbol} en Bybit; no abro otra encima."
         except Exception as e:
             print(f"Aviso: no pude verificar posiciones abiertas de {symbol}: {e}")
 
@@ -834,9 +846,9 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
 
         precio_objetivo = precio_actual
         if tipo_orden == 'limit' and zona_precio in ('soporte', 'resistencia'):
-            analisis = obtener_analisis_mexc(symbol, mercado)
+            analisis = obtener_analisis_bybit(symbol, mercado)
             if analisis.get('estado') == "FALLA EN EXCHANGE":
-                return False, 0, 0, 0, 0, 0, 0, "❌ **Error en MEXC:** no pude leer el soporte/resistencia. Intenta de nuevo."
+                return False, 0, 0, 0, 0, 0, 0, "❌ **Error en Bybit:** no pude leer el soporte/resistencia. Intenta de nuevo."
             if zona_precio == 'soporte':
                 precio_objetivo = float(analisis['soporte'])
                 side = 'buy'
@@ -844,13 +856,26 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
                 precio_objetivo = float(analisis['resistencia'])
                 side = 'sell'
 
-        # Apalancamiento y tipo de margen (MEXC exige openType y positionType)
+        # Apalancamiento y margen aislado (Bybit, modo one-way: buyLeverage == sellLeverage).
+        # Si Bybit rechaza el apalancamiento (p. ej. tope menor en un símbolo TradFi),
+        # NO se abre con otro apalancamiento en silencio: se devuelve el error a Telegram
+        # y queda como decisión pendiente del usuario.
         lev_ok = True
         if mercado == 'swap':
             try:
-                ex.set_leverage(apalancamiento, market_symbol,
-                                params={'openType': TIPO_MARGEN_MEXC, 'positionType': 1 if side == 'buy' else 2})
+                try:
+                    ex.set_margin_mode('isolated', market_symbol, {'leverage': int(apalancamiento)})
+                except Exception as e_margen:
+                    # La cuenta puede estar ya en aislado; no se puede cambiar con posición
+                    # abierta (aquí ya se verificó que no hay posición de esta moneda).
+                    print(f"Aviso de margen aislado: {e_margen}")
+                ex.set_leverage(apalancamiento, market_symbol)
             except Exception as e:
+                err_lev = str(e).lower()
+                if 'leverage' in err_lev or 'risk limit' in err_lev or 'max' in err_lev:
+                    return False, 0, 0, 0, 0, 0, 0, (f"⚠️ **APALANCAMIENTO NO APLICADO:** Bybit rechazó {apalancamiento}x para {symbol} "
+                                                      f"(posible tope menor en este símbolo). No abro la orden con otro apalancamiento: "
+                                                      f"decide tú qué hacemos. Detalle: {e}")
                 lev_ok = False
                 print(f"Aviso de apalancamiento: {e}")
 
@@ -862,16 +887,18 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             stop_loss = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 + sl_f)))
             take_profit = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - tp_f)))
 
-        # Stop de emergencia en MEXC: más lejos que el stop normal del bot, para que el bot te CONSULTE al tocar el normal
+        # Stop de emergencia en Bybit (adjunto a la orden): más lejos que el stop normal del bot, para que el bot te CONSULTE al tocar el normal
         if tipo_orden == 'market':
             f_duro = (sl_pct + posiciones.EXTRA_STOP_DURO_PCT) / 100
-            stop_mexc = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - f_duro) if side == 'buy' else precio_objetivo * (1 + f_duro)))
+            stop_duro_ex = float(ex.price_to_precision(market_symbol, precio_objetivo * (1 - f_duro) if side == 'buy' else precio_objetivo * (1 + f_duro)))
         else:
-            stop_mexc = stop_loss
+            stop_duro_ex = stop_loss
 
-        # MEXC opera en CONTRATOS (p. ej. 1 contrato de ETH = 0.01 ETH), no en monedas
+        # Bybit opera en CANTIDAD DE MONEDA BASE (barriles en BZ/CL, onzas en PAXG,
+        # monedas en ETH/ZEC). 'contratos' se conserva como nombre interno pero su
+        # unidad es moneda base (en Bybit, contractSize = 1 en ccxt).
         info_mercado = ex.market(market_symbol)
-        tam_contrato = float(info_mercado.get('contractSize') or 1.0)
+        tam_contrato = 1.0
         min_contratos = float(((info_mercado.get('limits') or {}).get('amount') or {}).get('min') or 1.0)
         contratos, error_tam = senales.dimensionar_contratos(
             margen_usdt, apalancamiento, precio_objetivo, tam_contrato, min_contratos, MARGEN_MAXIMO_USDT)
@@ -879,7 +906,7 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             return False, 0, 0, 0, 0, 0, 0, f"⚠️ **TAMAÑO INSUFICIENTE:** {error_tam}"
         cantidad = float(ex.amount_to_precision(market_symbol, contratos))
         if cantidad <= 0:
-            return False, 0, 0, 0, 0, 0, 0, "⚠️ **ERROR DE CÁLCULO:** el tamaño quedó en 0 contratos. Sube el margen."
+            return False, 0, 0, 0, 0, 0, 0, "⚠️ **ERROR DE CÁLCULO:** el tamaño quedó en 0. Sube el margen."
         nocional = cantidad * tam_contrato * precio_objetivo
         margen_real = nocional / apalancamiento
         if nocional < MONTO_MINIMO_USDT:
@@ -887,15 +914,14 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
 
         params = {}
         if mercado == 'swap':
-            # ccxt NO traduce {'stopLoss': {...}} en MEXC swap (el stop no llegaba al exchange).
-            # Los campos propios de la API de MEXC son stopLossPrice / takeProfitPrice, y en margen
-            # aislado (openType=1) ccxt exige además 'leverage'.
+            # Bybit v5 (ccxt-bybit): TP/SL adjuntos a la posición en modo Full y
+            # positionIdx 0 (modo one-way). El stop adjunto es el de emergencia
+            # (más lejos que el stop normal del bot); el TP es el techo de la señal.
             params = {
-                'openType': TIPO_MARGEN_MEXC,
-                'leverage': int(apalancamiento),
-                'stopLossPrice': stop_mexc,
-                'takeProfitPrice': take_profit,
-                'lossTrend': 1, 'profitTrend': 1,
+                'stopLoss': stop_duro_ex,
+                'takeProfit': take_profit,
+                'tpslMode': 'Full',
+                'positionIdx': 0,
             }
         ultima_orden_ts[symbol] = time.time()
         if tipo_orden == 'market':
@@ -926,10 +952,10 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
             pos.update({
                 'coin': symbol, 'market_symbol': market_symbol, 'margen': margen_real,
                 'apalancamiento': apalancamiento,
-                'contratos': confirmada['contratos'] if confirmada else cantidad,
+                'contratos': confirmada['contratos'] if confirmada else cantidad,  # cantidad en moneda base (Bybit)
                 'abierta_ts': time.time(), 'id': orden.get('id'),
                 'ultimo_precio': precio_entrada, 'sl_notificado': sl_virtual, 'aviso_error': 0,
-                'open_type': TIPO_MARGEN_MEXC, 'modo': 'trailing',
+                'open_type': 1, 'modo': 'trailing',  # Bybit: 1 = margen aislado (siempre)
                 'liquidacion': (confirmada or {}).get('liquidacion'),
                 'position_id': (confirmada or {}).get('position_id'),
             })
@@ -940,13 +966,28 @@ def ejecutar_orden_con_gestion_riesgo_real(symbol, mercado, side, margen_usdt, a
                            'sl_pct': sl_pct, 'tp_pct': tp_pct, 'confirmada': bool(confirmada)}
         return True, precio_entrada, margen_real, apalancamiento, tipo_orden, stop_loss, take_profit, orden
     except Exception as e:
+        # Rechazo defensivo: se devuelve el motivo exacto a Telegram y el ciclo
+        # de señales sigue (esta función devuelve False, nunca lanza).
         error_str = str(e)
-        if "minimum amount" in error_str or "minimum" in error_str:
-            mensaje_amigable = "❌ **Error en MEXC:** el tamaño es menor al mínimo permitido."
-        elif "balance" in error_str.lower() or "insufficient" in error_str.lower():
-            mensaje_amigable = "❌ **Error en MEXC:** Saldo insuficiente en la billetera."
+        err_low = error_str.lower()
+        if "agreement" in err_low:
+            mensaje_amigable = ("❌ **Error en Bybit:** falta firmar el acuerdo de petróleo en la app "
+                                "(no se firma con la llave del bot). Fírmalo en Bybit y vuelve a intentar.")
+        elif "reduce-only" in err_low or "reduce only" in err_low:
+            mensaje_amigable = ("❌ **Error en Bybit:** el símbolo está en solo-reduce-only "
+                                "(fin de semana de TradFi): no se puede abrir ahora. Intenta en día de mercado.")
+        elif "leverage" in err_low or "risk limit" in err_low:
+            mensaje_amigable = (f"❌ **Error en Bybit:** apalancamiento no aceptado para {symbol}. "
+                                f"No abro con otro apalancamiento: decide tú. Detalle: {error_str}")
+        elif "position mode" in err_low or "positionidx" in err_low or "hedge" in err_low:
+            mensaje_amigable = ("❌ **Error en Bybit:** la cuenta no está en modo one-way. "
+                                "Ponla en one-way en la app (sin posiciones abiertas) y vuelve a intentar.")
+        elif "minimum amount" in error_str or "minimum" in err_low or "min order" in err_low or "quantity" in err_low or "lot" in err_low:
+            mensaje_amigable = "❌ **Error en Bybit:** el tamaño es menor al mínimo permitido para este símbolo."
+        elif "balance" in err_low or "insufficient" in err_low:
+            mensaje_amigable = "❌ **Error en Bybit:** Saldo insuficiente en la billetera."
         else:
-            mensaje_amigable = f"❌ **Error en MEXC:** {error_str}"
+            mensaje_amigable = f"❌ **Error en Bybit:** {error_str}"
         return False, 0, 0, 0, 0, 0, 0, mensaje_amigable
 
 def texto_orden_ejecutada(titulo, coin, side, precio, margen_usado, lev_usado, tipo_usado, sl, tp, resultado):
@@ -954,27 +995,27 @@ def texto_orden_ejecutada(titulo, coin, side, precio, margen_usado, lev_usado, t
     direccion = "COMPRA (LONG) 🟢" if side == 'buy' else "VENTA (SHORT) 🔴"
     lineas = [
         f"✅ **{titulo}** ✅", "",
-        f"🪙 **Activo:** {coin}/USDT",
+        f"🪙 **Activo:** {posiciones.etiqueta_moneda(coin)} ({coin}/USDT)",
         f"📈 **Dirección:** {direccion}",
         f"💵 **Precio de Entrada:** ${_p(precio)}",
         f"💰 **Margen:** ${margen_usado:.2f} USDT",
         f"⚡ **Apalancamiento:** {lev_usado}x",
     ]
     if extra.get('contratos'):
-        lineas.append(f"📦 **Tamaño:** {extra['contratos']:g} contrato(s) (≈ ${extra['nocional']:.2f})")
+        lineas.append(f"📦 **Tamaño:** {extra['contratos']:g} en moneda base (≈ ${extra['nocional']:.2f})")
     lineas += [
         f"📋 **Tipo:** {tipo_usado.upper()}", "",
         f"🛑 **Stop Loss:** ${sl} ({extra.get('sl_pct', SL_PORCENTAJE)}%)",
         f"🎯 **Take Profit (techo):** ${tp}",
     ]
     if tipo_usado == 'market':
-        lineas.append("📊 **Trailing Stop:** ACTIVO. El bot sube el stop con el precio. Revisa en MEXC que también aparezcan el SL y el TP.")
+        lineas.append("📊 **Trailing Stop:** ACTIVO. El bot sube el stop con el precio. Revisa en Bybit que también aparezcan el SL y el TP.")
         if not extra.get('confirmada', True):
-            lineas.append("⚠️ No pude ver la posición en MEXC todavía. Revisa la app del exchange.")
+            lineas.append("⚠️ No pude ver la posición en Bybit todavía. Revisa la app del exchange.")
     else:
         lineas.append("📊 **Trailing Stop:** al ejecutarse la orden límite te ofreceré gestionarla con trailing (SL y TP fijos mientras tanto).")
     if not extra.get('lev_ok', True):
-        lineas.append("⚠️ No pude confirmar el apalancamiento en MEXC; se usa el que tengas configurado ahí.")
+        lineas.append("⚠️ No pude confirmar el apalancamiento en Bybit; se usa el que tengas configurado ahí.")
     lineas += ["", f"🆔 **ID de Orden:** `{resultado.get('id', 'N/A')}`"]
     return "\n".join(lineas)
 
@@ -988,7 +1029,7 @@ def finalizar_posicion(coin, pos, precio_salida, motivo):
     emoji = "🟢 GANANCIA" if pnl > 0 else "🔴 PÉRDIDA"
     reporte = (
         f"🎯 **OPERACIÓN CERRADA** 🎯\n\n"
-        f"🪙 **Activo:** {coin}/USDT\n"
+        f"🪙 **Activo:** {posiciones.etiqueta_moneda(coin)} ({coin}/USDT)\n"
         f"📈 **Dirección:** {'COMPRA (LONG) 🟢' if pos['lado'] == 'buy' else 'VENTA (SHORT) 🔴'}\n"
         f"💵 **Entrada:** ${_p(pos['entrada'])}\n"
         f"💵 **Salida (aprox.):** ${_p(precio_salida)}\n"
@@ -1010,13 +1051,9 @@ def finalizar_posicion(coin, pos, precio_salida, motivo):
 
 def cerrar_posicion_mercado(ex, pos):
     """Cierra la posición con una orden de mercado que solo reduce (no puede abrir una contraria).
-    Usa el tipo de margen real de la posición (aislado/cruzado) y su id si MEXC lo informó."""
+    Bybit, modo one-way: reduceOnly + positionIdx 0. No usa openType, leverage ni positionId."""
     lado_cierre = 'sell' if pos['lado'] == 'buy' else 'buy'
-    params = {'reduceOnly': True,
-              'openType': pos.get('open_type') or TIPO_MARGEN_MEXC,
-              'leverage': int(pos.get('apalancamiento') or APALANCAMIENTO_AUTO)}
-    if pos.get('position_id'):
-        params['positionId'] = pos['position_id']
+    params = {'reduceOnly': True, 'positionIdx': 0}
     ex.create_order(pos['market_symbol'], 'market', lado_cierre, pos['contratos'], None, params)
 
 def _pasado(lado, precio, nivel):
@@ -1033,7 +1070,7 @@ def _cerrar_y_finalizar(ex, coin, pos, precio, motivo):
         print(f"Error cerrando {coin}: {e}")
         if time.time() - pos.get('aviso_error', 0) > 300:
             pos['aviso_error'] = time.time()
-            avisar(f"🚨 {coin}: el stop se activó ({motivo}) pero NO pude cerrar la posición: {e}\nCiérrala manualmente en MEXC.")
+            avisar(f"🚨 {coin}: el stop se activó ({motivo}) pero NO pude cerrar la posición: {e}\nCiérrala manualmente en Bybit.")
         return False
     finalizar_posicion(coin, pos, precio, motivo)
     return True
@@ -1073,7 +1110,7 @@ def decidir_cierre(coin, pos, precio, motivo):
         m = InlineKeyboardMarkup(row_width=2)
         m.add(InlineKeyboardButton("✅ Cerrar ahora", callback_data=f"pos_clok_{coin}"),
               InlineKeyboardButton("✋ Mantener", callback_data=f"pos_mt_{coin}"))
-        enviar_dueno(posiciones.texto_consulta(coin, pos, precio, d, sl_duro, motivo, gestion_en_mexc=not pos.get('adoptada')), m)
+        enviar_dueno(posiciones.texto_consulta(coin, pos, precio, d, sl_duro, motivo, gestion_en_bybit=not pos.get('adoptada')), m)
         return None
     if _pasado(pos['lado'], precio, sl_duro):
         return "STOP DE EMERGENCIA (el precio siguió en contra mientras esperaba tu respuesta)"
@@ -1089,7 +1126,7 @@ def gestionar_posicion(ex, coin, pos):
         pos['errores_precio'] = pos.get('errores_precio', 0) + 1
         print(f"Error leyendo precio de {coin}: {e}")
         if pos['errores_precio'] == 5:
-            avisar(f"⚠️ No puedo leer el precio de {coin} en MEXC. El SL/TP que quedó puesto en MEXC sigue activo; revisa tu posición.")
+            avisar(f"⚠️ No puedo leer el precio de {coin} en Bybit. El SL/TP que quedó puesto en Bybit sigue activo; revisa tu posición.")
         return
     pos['errores_precio'] = 0
     pos['ultimo_precio'] = precio
@@ -1101,7 +1138,7 @@ def gestionar_posicion(ex, coin, pos):
     except Exception as e:
         print(f"Error leyendo la posición de {coin}: {e}")
     if leida and real is None and time.time() - pos['abierta_ts'] > GRACIA_POSICION_SEG:
-        finalizar_posicion(coin, pos, precio, "Cerrada en MEXC (SL/TP del exchange o cierre manual)")
+        finalizar_posicion(coin, pos, precio, "Cerrada en Bybit (SL/TP del exchange o cierre manual)")
         return
     if real:
         pos['contratos'] = real['contratos']
@@ -1168,7 +1205,7 @@ def margen_de_posicion(ex, p):
     if p['margen'] > 0:
         return p['margen']
     lev = p['apalancamiento'] or APALANCAMIENTO_AUTO
-    tam = float(ex.market(p['market_symbol']).get('contractSize') or 1.0)
+    tam = float(ex.market(p['market_symbol']).get('contractSize') or 1.0)  # Bybit: contractSize = 1 (moneda base)
     return p['contratos'] * tam * p['entrada'] / lev
 
 def enviar_dueno(texto, markup=None):
@@ -1181,7 +1218,7 @@ def enviar_dueno(texto, markup=None):
 def enviar_senal_con_grafico(chat_id, coin, senal, texto, markup=None, timeframe="15m",
                              stop=None, meta=None, caption_corta=None):
     """Señal de entrada o de salida con el dibujo de la operación en vivo: velas
-    cerradas + la vela en formación de MEXC de esa moneda, EMAs, entrada/stop/meta,
+    cerradas + la vela en formación de Bybit de esa moneda, EMAs, entrada/stop/meta,
     soporte/resistencia. Solo añade la foto: el texto, los botones y la estrategia
     quedan exactamente igual. Si el dibujo o la foto fallan, manda solo el texto:
     la señal nunca se pierde por el dibujo."""
@@ -1281,7 +1318,7 @@ def enviar_oferta_adopcion(ex, p):
         print(f"No pude ofrecer la posición de {p.get('coin')}: {e}")
 
 def detectar_posiciones_nuevas(ex):
-    """Busca en MEXC posiciones abiertas que el bot no gestiona (las abiertas a mano o por una orden límite
+    """Busca en Bybit posiciones abiertas que el bot no gestiona (las abiertas a mano o por una orden límite
     ejecutada) y te ofrece gestionarlas con botones. Cada posición se ofrece una sola vez."""
     abiertas = leer_todas_las_posiciones(ex)
     vivas = {p['coin'] for p in abiertas}
@@ -1402,8 +1439,7 @@ def cerrar_desde_boton(ex, coin):
     lado = posiciones.lado_orden(p['lado'])
     lev = p['apalancamiento'] or APALANCAMIENTO_AUTO
     precio = float(ex.fetch_ticker(ms)['last'])
-    cerrar_posicion_mercado(ex, {'market_symbol': ms, 'lado': lado, 'contratos': p['contratos'], 'apalancamiento': lev,
-                                 'open_type': p.get('open_type'), 'position_id': p.get('position_id')})
+    cerrar_posicion_mercado(ex, {'market_symbol': ms, 'lado': lado, 'contratos': p['contratos'], 'apalancamiento': lev})
     pos = posiciones_gestionadas.get(coin) or {'lado': lado, 'entrada': p['entrada'], 'margen': margen_de_posicion(ex, p),
                                                'apalancamiento': lev, 'sl': 0, 'id': 'manual'}
     finalizar_posicion(coin, pos, precio, "Cierre desde Telegram (botón)")
@@ -1515,7 +1551,7 @@ def accion_posicion(call, datos):
         try:
             ok, msg = cerrar_desde_boton(ex, coin)
         except Exception as e:
-            bot.send_message(chat, f"❌ No pude cerrar {coin}: {e}\nCiérrala manualmente en MEXC.")
+            bot.send_message(chat, f"❌ No pude cerrar {coin}: {e}\nCiérrala manualmente en Bybit.")
             return
         if not ok:
             bot.send_message(chat, msg)
@@ -1527,7 +1563,7 @@ def accion_posicion(call, datos):
             return
         if pos.get('modo', 'trailing') != 'vigilar':
             pos['modo'] = 'vigilar'
-            msg = "👀 Trailing APAGADO: ya no muevo ni activo el stop del bot. Sigues con el SL/TP que tengas en MEXC."
+            msg = "👀 Trailing APAGADO: ya no muevo ni activo el stop del bot. Sigues con el SL/TP que tengas en Bybit."
         else:
             precio = float(ex.fetch_ticker(ms)['last'])
             nuevo, nota = posiciones.crear_posicion_adoptada(pos['lado'], pos['entrada'], precio, SL_PORCENTAJE, 'trailing')
@@ -1567,9 +1603,9 @@ def analisis_de_posicion(ex, p):
 _ultimo_error_activas = ['']
 
 def resumen_activas(con_analisis=True):
-    """(n, texto) de las operaciones abiertas en MEXC Futuros. n es None si no se pudo leer."""
+    """(n, texto) de las operaciones abiertas en Bybit Futuros. n es None si no se pudo leer."""
     abiertas, ex, error = None, None, None
-    for intento in (1, 2):                       # MEXC a veces falla un instante: se reintenta una vez
+    for intento in (1, 2):                       # Bybit a veces falla un instante: se reintenta una vez
         try:
             ex = crear_instancia_exchange('swap')
             abiertas = leer_todas_las_posiciones(ex)
@@ -1579,7 +1615,7 @@ def resumen_activas(con_analisis=True):
             time.sleep(1.5)
     if abiertas is None:
         _ultimo_error_activas[0] = str(error)[:80]
-        return None, f"⚠️ No pude leer tus operaciones en MEXC ahora mismo ({error}). Intenta de nuevo en unos segundos."
+        return None, f"⚠️ No pude leer tus operaciones en Bybit ahora mismo ({error}). Intenta de nuevo en unos segundos."
     try:
         lineas = []
         for p in abiertas:
@@ -1592,7 +1628,7 @@ def resumen_activas(con_analisis=True):
                 lineas.append(f"{p['coin']} {p['lado']} (no pude leer su precio: {e})")
         return len(abiertas), posiciones.texto_activas(lineas)
     except Exception as e:
-        return None, f"⚠️ No pude leer tus operaciones en MEXC ahora mismo ({e})."
+        return None, f"⚠️ No pude leer tus operaciones en Bybit ahora mismo ({e})."
 
 @bot.message_handler(commands=['activas'], func=es_dueno)
 def cmd_activas(message):
@@ -1606,10 +1642,10 @@ def cmd_activas(message):
     bot.send_message(message.chat.id, texto, reply_markup=m)
 
 def enviar_toggle_autoadopt(chat_id):
-    """Botón ON/OFF para adoptar solas las manuales (solo ETH/ZEC, nunca BTC)."""
+    """Botón ON/OFF para adoptar solas las manuales (solo operables, nunca BTC)."""
     m = InlineKeyboardMarkup(row_width=1)
     m.add(InlineKeyboardButton(f"🤖 Adoptar mis manuales: {'ON ✅' if ADOPTAR_MANUALES_AUTO else 'OFF ⏸️'}", callback_data="autoadopt_toggle"))
-    bot.send_message(chat_id, "Adoptar mis manuales (solo operables: ETH, ZEC, PAXG, UKOIL; nunca BTC): el bot adopta sola cada posición manual nueva con trailing.", reply_markup=m)
+    bot.send_message(chat_id, "Adoptar mis manuales (solo operables: ETH, ZEC, PAXG, Brent (BZUSDT), WTI (CLUSDT); nunca BTC): el bot adopta sola cada posición manual nueva con trailing.", reply_markup=m)
 
 @bot.message_handler(commands=['posiciones'], func=es_dueno)
 def ver_posiciones(message):
@@ -1619,10 +1655,10 @@ def ver_posiciones(message):
         ex = crear_instancia_exchange('swap')
         abiertas = leer_todas_las_posiciones(ex)
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ No pude leer tus posiciones en MEXC ahora mismo ({e}). Intenta de nuevo en unos segundos.")
+        bot.send_message(message.chat.id, f"⚠️ No pude leer tus posiciones en Bybit ahora mismo ({e}). Intenta de nuevo en unos segundos.")
         return
     if not abiertas:
-        bot.send_message(message.chat.id, "📭 No tienes posiciones abiertas en MEXC.")
+        bot.send_message(message.chat.id, "📭 No tienes posiciones abiertas en Bybit.")
         enviar_toggle_autoadopt(message.chat.id)
         return
     for p in abiertas:
@@ -1641,13 +1677,13 @@ def ver_saldo(message):
         ex = crear_instancia_exchange('swap')
         bal = ex.fetch_balance()
     except Exception as e:
-        bot.send_message(message.chat.id, f"⚠️ No pude leer tu saldo en MEXC ahora mismo ({e}). Intenta de nuevo en unos segundos.")
+        bot.send_message(message.chat.id, f"⚠️ No pude leer tu saldo en Bybit ahora mismo ({e}). Intenta de nuevo en unos segundos.")
         return
     usdt = (bal.get('USDT') or {}) if isinstance(bal, dict) else {}
     total = usdt.get('total')
     libre = usdt.get('free')
     usado = usdt.get('used')
-    lineas = ["💰 SALDO MEXC FUTUROS"]
+    lineas = ["💰 SALDO BYBIT"]
     if total is not None:
         lineas.append(f"Total: ${total:.2f} USDT")
     if libre is not None:
@@ -1655,22 +1691,11 @@ def ver_saldo(message):
     if usado is not None:
         lineas.append(f"En uso (margen): ${usado:.2f} USDT")
     if total is None and libre is None and usado is None:
-        lineas.append("No pude desglosar el saldo en USDT; revisa MEXC.")
-    try:
-        ex_spot = crear_instancia_exchange('spot')
-        bal_spot = ex_spot.fetch_balance()
-        usdt_spot = (bal_spot.get('USDT') or {}) if isinstance(bal_spot, dict) else {}
-        lineas.append("")
-        lineas.append("📊 SPOT")
-        if usdt_spot.get('total') is not None:
-            lineas.append(f"Total: ${usdt_spot['total']:.2f} USDT")
-        if usdt_spot.get('free') is not None:
-            lineas.append(f"Disponible: ${usdt_spot['free']:.2f} USDT")
-        if usdt_spot.get('total') is None and usdt_spot.get('free') is None:
-            lineas.append("Sin saldo USDT en spot.")
-    except Exception:
-        lineas.append("")
-        lineas.append("📊 SPOT: no pude leerlo ahora mismo.")
+        lineas.append("No pude desglosar el saldo en USDT; revisa Bybit.")
+    # Bybit UTA: una sola billetera (spot y derivados comparten el USDT).
+    # El bloque SPOT separado desapareció: el saldo de arriba ya lo incluye todo.
+    lineas.append("")
+    lineas.append("📌 Billetera unificada (UTA): el saldo de arriba incluye spot y derivados.")
     try:
         abiertas = leer_todas_las_posiciones(ex)
     except Exception:
@@ -1687,7 +1712,7 @@ def ver_saldo(message):
             margen = p['margen'] if p['margen'] > 0 else margen_de_posicion(ex, p)
             pct, pnl = senales.pnl_estimado(p['lado'], p['entrada'], precio, margen, p['apalancamiento'])
             pnl_total += pnl
-            lineas.append(f"{p['coin']} {'LONG 🟢' if p['lado'] == 'buy' else 'SHORT 🔴'} | PnL {pct:+.2f}% (${pnl:+.2f})")
+            lineas.append(f"{posiciones.etiqueta_moneda(p['coin'])} {'LONG 🟢' if p['lado'] == 'buy' else 'SHORT 🔴'} | PnL {pct:+.2f}% (${pnl:+.2f})")
         lineas.append(f"PnL total no realizado: ${pnl_total:+.2f}")
     else:
         lineas.append("")
@@ -1708,15 +1733,17 @@ def mostrar_menu_principal(message):
         InlineKeyboardButton("🟣 SOL", callback_data="ver_SOL"),
         InlineKeyboardButton("🟠 DOGE", callback_data="ver_DOGE"),
         InlineKeyboardButton("🟡 ZEC", callback_data="ver_ZEC"),
-        InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE")
+        InlineKeyboardButton("🐸 PEPE", callback_data="ver_PEPE"),
+        InlineKeyboardButton("🛢️ Brent", callback_data="ver_BZ"),
+        InlineKeyboardButton("🛢️ WTI", callback_data="ver_CL")
     )
     n_activas, _ = resumen_activas(con_analisis=False)
     markup.add(InlineKeyboardButton(f"📌 Operaciones activas ({'?' if n_activas is None else n_activas})", callback_data="activas_x"))
     markup.add(InlineKeyboardButton("📊 Backtest 30 días", callback_data="backtest_go"))
-    linea_activas = ("📌 Operaciones activas en MEXC Futuros: " + (f"no pude leerlas ahora ({_ultimo_error_activas[0]})" if n_activas is None else str(n_activas)))
+    linea_activas = ("📌 Operaciones activas en Bybit Futuros: " + (f"no pude leerlas ahora ({_ultimo_error_activas[0]})" if n_activas is None else str(n_activas)))
     cfg = avisos.config()
     linea_activas += chr(10) + f"🎚️ Sensibilidad: {cfg['sensibilidad'].upper()} " + ("(solo señales VERDADERAS)" if cfg['sensibilidad'] == 'estricta' else "(también señales PROBABLES)") + chr(10) + f"🔔 Avisos de entrada: {'ON' if cfg['activo'] else 'OFF'}"
-    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - MEXC** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en MEXC\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /saldo - Tu saldo en MEXC y ganancia/pérdida abierta\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos\n• /backtest - Probar la estrategia con datos pasados", reply_markup=markup, parse_mode="Markdown")
+    bot.send_message(message.chat.id, "📈 **PANEL DE SEÑALES - Bybit** 🟢\n\n" + linea_activas + "\n\nComandos:\n• /menu - Panel\n• /operar - Operar manual\n• /analisis - Análisis técnico\n• /predicciones - Predicciones 5 min\n• /activas - Cuántas operaciones tienes abiertas en Bybit\n• /posiciones - Tus posiciones con botones\n• /estado - Posiciones y pérdida del día\n• /saldo - Tu saldo en Bybit y ganancia/pérdida abierta\n• /mercado - Qué ve el bot ahora (puntos de entrada)\n• /senales on|off - Avisos de entrada\n• /sensibilidad - Estricta o normal\n• /vigilar ETH 3500 - Aviso al llegar a un precio\n• /aciertos - Historial de aciertos\n• /backtest - Probar la estrategia con datos pasados", reply_markup=markup, parse_mode="Markdown")
 
 @bot.message_handler(commands=['operar'], func=es_dueno)
 def menu_operar(message):
@@ -1724,7 +1751,7 @@ def menu_operar(message):
     ULTIMO_CHAT_ID = message.chat.id
     markup = InlineKeyboardMarkup(row_width=2)
     markup.add(
-        InlineKeyboardButton("⚡ Futuros (MEXC)", callback_data="menu_futuros")
+        InlineKeyboardButton("⚡ Futuros (Bybit)", callback_data="menu_futuros")
     )
     bot.send_message(message.chat.id, "⚙️ **CENTRAL DE OPERACIONES (FUTUROS PERPETUOS)** 🟢", reply_markup=markup, parse_mode="Markdown")
 
@@ -1741,7 +1768,8 @@ def menu_analisis(message):
         InlineKeyboardButton("🟡 ZEC", callback_data="ana_ZEC"),
         InlineKeyboardButton("🐸 PEPE", callback_data="ana_PEPE"),
         InlineKeyboardButton("🥇 PAXG (Oro)", callback_data="ana_PAXG"),
-        InlineKeyboardButton("🛢️ UKOIL (Brent)", callback_data="ana_UKOIL")
+        InlineKeyboardButton("🛢️ BZ (Brent)", callback_data="ana_BZ"),
+        InlineKeyboardButton("🛢️ CL (WTI)", callback_data="ana_CL")
     )
     bot.send_message(message.chat.id, "🔍 **Selecciona el activo para análisis técnico:**", reply_markup=markup, parse_mode="Markdown")
 
@@ -1848,7 +1876,7 @@ def registrar_senal_historial(coin, s):
         print(f"No pude registrar la señal en el historial: {e}")
 
 def resolver_pendientes():
-    """Evalúa con datos reales de MEXC las predicciones (a 5 min) y las señales (SL o TP primero)."""
+    """Evalúa con datos reales de Bybit las predicciones (a 5 min) y las señales (SL o TP primero)."""
     ahora = int(time.time() * 1000)
     pendientes = historial.pendientes(ahora)
     if not pendientes:
@@ -2016,7 +2044,7 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Analizando {coin}...")
             analisis = obtener_analisis_con_reintentos(coin, 'swap')
             if analisis.get('estado') == "FALLA EN EXCHANGE":
-                bot.send_message(call.message.chat.id, f"⚠️ MEXC no respondió para {coin}/USDT (error temporal del exchange). Intenta de nuevo en unos segundos.")
+                bot.send_message(call.message.chat.id, f"⚠️ Bybit no respondió para {coin}/USDT (error temporal del exchange). Intenta de nuevo en unos segundos.")
                 return
             t4h = obtener_tendencia_4h(coin, 'swap')
             sentimiento = obtener_sentimiento_mercado()
@@ -2072,7 +2100,7 @@ def callback_query(call):
                              f"🪙 {coin}/USDT | {'COMPRA (LONG)' if tipo == 'COMPRA' else 'VENTA (SHORT)'}\n"
                              f"💰 Margen: ${monto:g} × {APALANCAMIENTO_AUTO}x = posición de ≈ ${monto * APALANCAMIENTO_AUTO:g}\n"
                              f"🛡️ SL {sl_txt} | el stop sube con el precio\n"
-                             f"🔔 Al tocar el stop te CONSULTO antes de cerrar; en MEXC queda un stop de emergencia {posiciones.EXTRA_STOP_DURO_PCT:g}% más lejos.\n\n"
+                             f"🔔 Al tocar el stop te CONSULTO antes de cerrar; en Bybit queda un stop de emergencia {posiciones.EXTRA_STOP_DURO_PCT:g}% más lejos.\n\n"
                              "Si no pulsas Confirmar, no se ejecuta nada.", reply_markup=m)
 
         # === MONTO SELECCIONADO (ejecutar con el apalancamiento automático) ===
@@ -2138,7 +2166,7 @@ def callback_query(call):
             bot.answer_callback_query(call.id, f"Adoptar mis manuales: {'ON' if nuevo else 'OFF'}")
             bot.send_message(call.message.chat.id,
                              f"🤖 Adoptar mis manuales: {'ON ✅' if nuevo else 'OFF ⏸️'}\n"
-                             + ("El bot adoptará solas tus posiciones manuales de ETH y ZEC con trailing (las detecta cada 60 s)." if nuevo else "El bot ya no adoptará solas tus posiciones manuales; te las seguirá ofreciendo con botones."))
+                             + ("El bot adoptará solas tus posiciones manuales de los operables con trailing (las detecta cada 60 s)." if nuevo else "El bot ya no adoptará solas tus posiciones manuales; te las seguirá ofreciendo con botones."))
 
         elif accion in ("pos", "padopt", "pign"):
             accion_posicion(call, datos)
@@ -2150,10 +2178,10 @@ def callback_query(call):
 
         # === MENÚ FUTUROS ===
         elif call.data == "menu_futuros":
-            bot.answer_callback_query(call.id, "Futuros MEXC...")
+            bot.answer_callback_query(call.id, "Futuros Bybit...")
             m = InlineKeyboardMarkup(row_width=2)
             m.add(*[InlineKeyboardButton(f"⚡ {c}", callback_data=f"opc_fut_{c}") for c in MONEDAS_OPERABLES])
-            bot.send_message(call.message.chat.id, "⚡ **Selecciona Activo para Futuros (MEXC):**", reply_markup=m, parse_mode="Markdown")
+            bot.send_message(call.message.chat.id, "⚡ **Selecciona Activo para Futuros (Bybit):**", reply_markup=m, parse_mode="Markdown")
 
         # === SELECCIÓN DE MONEDA FUTUROS ===
         elif len(datos) == 3 and datos[0] == "opc":
@@ -2166,7 +2194,7 @@ def callback_query(call):
                     InlineKeyboardButton("10x", callback_data=f"lev_{coin}_10"),
                     InlineKeyboardButton("20x", callback_data=f"lev_{coin}_20")
                 )
-                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (MEXC):**", reply_markup=m_lev, parse_mode="Markdown")
+                bot.send_message(call.message.chat.id, f"⚙️ **Elige Apalancamiento para {coin} (Bybit):**", reply_markup=m_lev, parse_mode="Markdown")
 
         # === SELECCIÓN DE APALANCAMIENTO ===
         elif accion == "lev" and len(datos) == 3:

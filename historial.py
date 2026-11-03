@@ -1,4 +1,4 @@
-"""Historial de aciertos: guarda cada predicción y señal y anota, con datos reales de MEXC, si se cumplió.
+"""Historial de aciertos: guarda cada predicción y señal y anota, con datos reales de Bybit, si se cumplió.
 
 Archivo JSON Lines (un evento por línea). La ruta se puede cambiar con la variable de entorno
 HISTORIAL_PATH. En Render el disco es efímero: sin un Disk persistente el historial se
