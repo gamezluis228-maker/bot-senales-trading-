@@ -1,3 +1,5 @@
+# NOTA (rama binance, solo análisis): este módulo NO se usa desde bot_render.py;
+# el bot no gestiona posiciones. Se conserva por sus pruebas unitarias (tests/).
 """Recuerda el modo elegido para cada posición (trailing / vigilar / ignorar) entre reinicios del bot.
 
 Archivo JSON; ruta configurable con MODOS_PATH. En Render el disco es efímero: sobrevive a reinicios

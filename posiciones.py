@@ -1,3 +1,5 @@
+# NOTA (rama binance, solo análisis): este módulo NO se usa desde bot_render.py;
+# el bot no gestiona posiciones. Se conserva por sus pruebas unitarias (tests/).
 """Lógica pura para vigilar posiciones abiertas, también las que abres a mano (sin red ni Telegram).
 
 Se prueba con datos simulados:  python3 tests/test_posiciones.py

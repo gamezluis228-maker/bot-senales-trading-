@@ -372,7 +372,7 @@ def evaluar(simbolo, v1h, v4h=None, vbtc=None):
 # ----------------------------------------------------------------------------
 def dimensionar_contratos(margen_usdt, apalancamiento, precio, tamano_contrato,
                           min_contratos=1.0, tope_margen=5.0):
-    """Convierte margen x apalancamiento en cantidad (en Bybit la cantidad es moneda base:
+    """Convierte margen x apalancamiento en cantidad (la cantidad es moneda base:
     barriles, onzas o monedas; el nombre "contratos" se conserva por compatibilidad).
     Devuelve (contratos, mensaje_error). Si el margen no alcanza para el mínimo de 1 contrato,
     se permite subirlo hasta 1.5x del margen pedido (y nunca más que el tope)."""

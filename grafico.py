@@ -61,7 +61,7 @@ def dibujar_operacion(coin, velas, senal, n_mostrar=N_MOSTRAR, vela_viva=None, s
     senal trae: tipo (COMPRA/VENTA), direccion (LONG/SHORT), precio, sl_pct, tp_pct,
     titulo; y opcionalmente soporte/resistencia (las señales de senales.py las traen;
     las de avisos no, y entonces se calculan de la ventana mostrada).
-    velas son las CERRADAS; vela_viva (opcional) es la vela en formación de Bybit y se
+    velas son las CERRADAS; vela_viva (opcional) es la vela en formación de Binance y se
     dibuja hueca con la etiqueta EN VIVO, para que el dibujo muestre el precio live
     del momento del envío y no solo el último cierre.
     stop/meta explícitos (para las alertas de salida, donde el stop es el trailing del

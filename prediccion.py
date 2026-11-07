@@ -151,7 +151,7 @@ def cuadro_veredicto(coin, pred, obj, operable):
         accion = "COMPRA (LONG)" if d == "SUBE" else "VENTA (SHORT)"
         L.append(f"👉 Plan: {accion}." + (" Señal débil: ojo." if pred["confianza"] == "BAJA" else ""))
         L.append("👇 Elige el monto (te pediré confirmar)." if operable
-                 else f"ℹ️ El bot solo opera {', '.join(OPERABLES)}; {coin} es solo informativo.")
+                 else "ℹ️ El bot es solo análisis: no opera. Si entras, lo haces tú a mano en Quantfury.")
     return "\n".join(L)
 
 
@@ -174,4 +174,4 @@ def texto_directo(coin, pred, obj, operable=False):
     return "\n".join(L)
 
 
-OPERABLES = ("BTC", "ETH", "ZEC")
+OPERABLES = ()  # Rama binance (solo análisis): NADA es operable; la tupla queda vacía por compatibilidad.
