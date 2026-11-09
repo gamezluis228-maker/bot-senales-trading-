@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import threading
 import time
 from datetime import datetime, timezone, timedelta
@@ -219,6 +220,74 @@ def es_dueno(obj):
 
 _hilo_local = threading.local()   # instancias ccxt por hilo (ccxt no es thread-safe)
 
+# --- Protección anti-baneo de Binance (IP compartida de Render) ---------------
+# Binance devuelve 418 / código -1003 "Way too many requests" y banea la IP
+# saliente (compartida por muchos servicios de Render) hasta la hora que indica
+# el propio mensaje ("banned until <milisegundos>"). Cada petición nueva
+# durante el baneo LO ALARGA, así que cuando aparece un baneo el bot deja de
+# tocar Binance hasta que pase la hora indicada y no reintenta. Sin esto, los
+# reintentos de cada ciclo de 15 min + cada /menu alargaban el baneo sin fin
+# (pasó la noche del 2026-11-08: baneo hasta la 01:24 de Caracas).
+_BANEO_BINANCE_HASTA = 0.0      # epoch en segundos; 0 = sin baneo conocido
+_MARGEN_BANEO_SEG = 60          # colchón extra al terminar el baneo
+_ULTIMO_AVISO_BANEO_TS = 0.0    # último aviso de baneo mandado a Telegram
+
+def _es_error_baneo(texto_o_error):
+    """True si el texto/error es un baneo de Binance por exceso de peticiones."""
+    texto = str(texto_o_error)
+    return ("-1003" in texto) or ("banned until" in texto) or ("418" in texto and "binance" in texto.lower())
+
+def _registrar_baneo_binance(texto_o_error):
+    """Si el error es un baneo de Binance, guarda hasta cuándo no hay que tocar
+    Binance. Devuelve True si era un baneo."""
+    global _BANEO_BINANCE_HASTA
+    texto = str(texto_o_error)
+    if not _es_error_baneo(texto_o_error):
+        return False
+    m = re.search(r"banned until (\d+)", texto)
+    if m:
+        hasta = int(m.group(1)) / 1000.0 + _MARGEN_BANEO_SEG
+    else:
+        hasta = time.time() + 600  # sin hora en el mensaje: 10 min por defecto
+    if hasta > _BANEO_BINANCE_HASTA:
+        _BANEO_BINANCE_HASTA = hasta
+    print(f"Binance baneó la IP hasta {time.strftime('%H:%M:%S', time.localtime(_BANEO_BINANCE_HASTA))}; no se tocará Binance hasta entonces.")
+    return True
+
+def _binance_bloqueado():
+    """True mientras dure un baneo de Binance registrado."""
+    return time.time() < _BANEO_BINANCE_HASTA
+
+def _proteger_instancia(exchange):
+    """Envuelve fetch_ohlcv y load_markets de una instancia ccxt para que:
+    - si Binance tiene la IP baneada, falle rápido SIN tocar la red;
+    - si una llamada devuelve un baneo, registre hasta cuándo no insistir.
+    Cubre todos los hilos y todas las llamadas (reportes, señales, /menu)."""
+    orig_fetch = exchange.fetch_ohlcv
+    orig_load = exchange.load_markets
+
+    def fetch_ohlcv_protegido(*args, **kwargs):
+        if _binance_bloqueado():
+            raise Exception(f"Binance bloqueado por baneo hasta {time.strftime('%H:%M:%S', time.localtime(_BANEO_BINANCE_HASTA))} (sin tocar la red)")
+        try:
+            return orig_fetch(*args, **kwargs)
+        except Exception as e:
+            _registrar_baneo_binance(e)
+            raise
+
+    def load_markets_protegido(*args, **kwargs):
+        if _binance_bloqueado():
+            raise Exception(f"Binance bloqueado por baneo hasta {time.strftime('%H:%M:%S', time.localtime(_BANEO_BINANCE_HASTA))} (sin tocar la red)")
+        try:
+            return orig_load(*args, **kwargs)
+        except Exception as e:
+            _registrar_baneo_binance(e)
+            raise
+
+    exchange.fetch_ohlcv = fetch_ohlcv_protegido
+    exchange.load_markets = load_markets_protegido
+    return exchange
+
 # SIN CLAVES: el bot es solo análisis y lee precios/velas PÚBLICAS de Binance.
 # No hay obtener_credenciales_* en esta rama: en Render solo hace falta TEL_TOKEN.
 # (Las funciones de MEXC/Bybit se eliminaron; si algún día vuelve a operar,
@@ -236,7 +305,7 @@ def crear_instancia_exchange(mercado='swap'):
             'enableRateLimit': True,
             'options': {'defaultType': 'future'}
         }
-        cache[mercado] = ccxt.binance(config)
+        cache[mercado] = _proteger_instancia(ccxt.binance(config))
     return cache[mercado]
 
 exchange_default = crear_instancia_exchange('swap')
@@ -382,11 +451,14 @@ def detectar_rompimiento(symbol, mercado='swap'):
         print(f"Error detectando rompimiento en {symbol}: {e}")
         return []
 def obtener_analisis_con_reintentos(symbol, mercado='swap', intentos=3, espera=3):
-    """Binance a veces responde 5xx o límite de tasa. Reintenta antes de rendirse."""
+    """Binance a veces responde 5xx o límite de tasa. Reintenta antes de rendirse.
+    Si es un baneo (-1003/418) NO reintenta: cada intento alarga el baneo."""
     a = None
     for _ in range(intentos):
         a = obtener_analisis_binance(symbol, mercado)
         if a.get('estado') != "FALLA EN EXCHANGE":
+            return a
+        if _es_error_baneo(a.get('pausa', '')):
             return a
         time.sleep(espera)
     return a
@@ -409,6 +481,7 @@ def construir_reporte(titulo, coin, a, t4h, sentimiento):
     )
 
 def bucle_reportes_automaticos():
+    global _ULTIMO_AVISO_BANEO_TS
     time.sleep(10)
     while True:
         try:
@@ -422,7 +495,14 @@ def bucle_reportes_automaticos():
                         if a.get('estado') == "FALLA EN EXCHANGE":
                             print(f"Binance no respondió para {coin}: {a.get('pausa')}")
                             if ULTIMO_CHAT_ID:
-                                bot.send_message(ULTIMO_CHAT_ID, f"⚠️ Binance no respondió para {coin}/USDT (error temporal del exchange). Reintento en el próximo ciclo de 15 min.")
+                                if _es_error_baneo(a.get('pausa', '')):
+                                    # Baneo: un solo aviso por episodio (cada 30 min),
+                                    # no un aviso por moneda y por ciclo.
+                                    if now_ts - _ULTIMO_AVISO_BANEO_TS > 1800:
+                                        _ULTIMO_AVISO_BANEO_TS = now_ts
+                                        bot.send_message(ULTIMO_CHAT_ID, f"⚠️ Binance bloqueó la IP por exceso de peticiones hasta las {time.strftime('%H:%M', time.localtime(_BANEO_BINANCE_HASTA))}. No insisto hasta entonces; los reportes vuelven solos.")
+                                else:
+                                    bot.send_message(ULTIMO_CHAT_ID, f"⚠️ Binance no respondió para {coin}/USDT (error temporal del exchange). Reintento en el próximo ciclo de 15 min.")
                             continue
                         t4h = obtener_tendencia_4h(coin, 'swap')
                         sentimiento = obtener_sentimiento_mercado()
